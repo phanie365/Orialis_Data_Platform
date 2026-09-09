@@ -1,0 +1,70 @@
+# ---------------------------------------------------------------------------
+# Orialis Data Platform - files that stay on the local machine
+# ---------------------------------------------------------------------------
+
+# --- Local databases -------------------------------------------------------
+# The CRM SQLite database is a LOCAL artefact: it is rebuilt from the scripts
+# in CRM/scripts/ (init_db, seed_*, simulate_daily_activity). It must never be
+# pushed - it is several megabytes, it changes on every simulated day, and a
+# binary file cannot be reviewed in a diff.
+CRM/data/*.db
+CRM/data/*.db-journal
+CRM/data/*.db-wal
+CRM/data/*.db-shm
+*.sqlite
+*.sqlite3
+
+# --- Secrets and local configuration ---------------------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+credentials.json
+secrets.json
+
+# --- Python virtual environments -------------------------------------------
+.venv/
+venv/
+ENV/
+env/
+
+# --- Python build and cache artefacts --------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# --- Test and tooling caches -----------------------------------------------
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.ipynb_checkpoints/
+
+# --- Editors and IDEs ------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# --- Operating system junk -------------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Logs and local scratch files ------------------------------------------
+*.log
+logs/
+tmp/

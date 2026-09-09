@@ -1,0 +1,21 @@
+# Orialis Data Platform - Python dependencies
+#
+#   python -m venv .venv
+#   .venv\Scripts\activate        (Windows)
+#   source .venv/bin/activate     (macOS / Linux)
+#   pip install -r requirements.txt
+#
+# Tested with Python 3.12.
+#
+# Note: the CRM scripts (init_db, seed_*, simulate_daily_activity,
+# test_incremental_behavior) need NOTHING from this file - they run on the
+# standard library alone, sqlite3 included. These packages are only required
+# to serve the REST API.
+
+# Web framework serving the CRM REST API.
+fastapi>=0.115.0,<1.0
+
+# ASGI server running the application:
+#   uvicorn CRM.app.main:app --reload
+# Add the [standard] extra for faster reloads and HTTP parsing if needed.
+uvicorn>=0.34.0,<1.0
