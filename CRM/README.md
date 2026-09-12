@@ -45,17 +45,45 @@ The CRM currently runs on:
 - **Python**
 - **FastAPI** — REST API
 - **Uvicorn** — ASGI server
-- **psycopg 3** — PostgreSQL driver
+- **psycopg 3** — PostgreSQL driver, with **psycopg_pool** for the API
 - **PostgreSQL hosted on Supabase** — the database
 
 ```
-HTTP client  ──►  FastAPI  ──►  psycopg 3  ──►  PostgreSQL / Supabase
+HTTP client  ──►  FastAPI  ──►  connection pool  ──►  PostgreSQL / Supabase
 
-Seeds / Simulator  ──────────►  psycopg 3  ──►  PostgreSQL / Supabase
+Seeds / Simulator  ─────────►  psycopg 3  ─────────►  PostgreSQL / Supabase
 ```
 
 Both halves — the API and the command-line scripts — read the same connection
-string from `CRM/config.py`, which loads it from a local `.env` file.
+string from `CRM/config.py`, which loads it from a local `.env` file. The
+scripts open a single connection and exit; only the API pools.
+
+### Connection pool
+
+The API borrows its connections from a `psycopg_pool.ConnectionPool` instead
+of opening a new one on every request. The pool is opened when the
+application starts and closed when it stops, through FastAPI's **lifespan** —
+it is never created at import time, and never left behind with connections
+still open.
+
+| Setting | Value |
+|---|---|
+| `min_size` | 2 |
+| `max_size` | 5 |
+| `timeout` | 10 s |
+| `max_idle` | 5 min |
+| `max_lifetime` | 30 min |
+
+These values follow a **measurement, not an anticipated stack choice**:
+opening a connection to Supabase was timed at roughly 800 ms against about
+150 ms for the query itself, so most of each request was being spent
+connecting. The sizes stay small on purpose — this is a single-worker
+demonstration backend sharing a Supabase project with the seeding scripts,
+so requests beyond the fifth wait for a free connection rather than opening
+a sixth.
+
+`get_connection()` kept its signature through the change, which is why no
+router had to be modified.
 
 ## From SQLite to PostgreSQL
 
@@ -308,11 +336,6 @@ Deliberate for this version, and the honest starting point for what comes next.
 - **No authentication.** No API key, no token, no `X-API-Key` header: every
   endpoint, plus `/` and `/docs`, answers to any caller. This must be
   addressed before the API is exposed publicly.
-- **No connection pool.** `get_connection()` opens one psycopg connection per
-  request and closes it afterwards. Establishing a connection to Supabase
-  costs roughly 800 ms against about 150 ms for the query itself, so most of
-  each request is spent connecting. Pooling is an identified optimisation, not
-  something already in place.
 - **No write endpoints.** The API reads; the scripts write.
 - **No deletion tracking**, so incremental extraction cannot detect a removed
   row. The usual remedy is a soft delete.
@@ -328,5 +351,5 @@ Deliberate for this version, and the honest starting point for what comes next.
 | V1 — local SQLite prototype | done |
 | V2 — PostgreSQL on Supabase | **done, current** |
 
-Identified next steps, in order of impact: a connection pool, API
-authentication, and the composite watermark at the ingestion layer.
+Identified next steps, in order of impact: API authentication, and the
+composite watermark at the ingestion layer.

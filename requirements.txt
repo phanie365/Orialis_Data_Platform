@@ -32,6 +32,12 @@ uvicorn>=0.34.0,<1.0
 # needed locally.
 psycopg[binary]>=3.2,<4.0
 
+# Connection pool for the API. Opening a connection to Supabase costs ~800 ms
+# against ~150 ms for a query, so the API keeps a few connections warm rather
+# than reconnecting on every request. Opened and closed by the FastAPI
+# lifespan; the scripts do not use it - they open one connection and exit.
+psycopg_pool>=3.2,<4.0
+
 # Reads DATABASE_URL from a local .env file (see .env.example).
 # The .env file itself is never committed.
 python-dotenv>=1.0,<2.0
