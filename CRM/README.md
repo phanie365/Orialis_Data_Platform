@@ -174,8 +174,8 @@ Tested with Python 3.12.
 
 ## Configuration
 
-The CRM reads a single environment variable, `DATABASE_URL`, from a `.env`
-file at the repository root. Copy the template and fill in your own values:
+The CRM reads two environment variables from a `.env` file at the repository
+root. Copy the template and fill in your own values:
 
 ```bash
 cp .env.example .env
@@ -183,7 +183,22 @@ cp .env.example .env
 
 ```
 DATABASE_URL=postgresql://<USER>:<PASSWORD>@<HOST>:<PORT>/<DATABASE>?sslmode=require
+CRM_API_KEY=<a long random string>
 ```
+
+| Variable | Used by | Purpose |
+|---|---|---|
+| `DATABASE_URL` | API and scripts | PostgreSQL connection string |
+| `CRM_API_KEY` | API only | Shared secret protecting every `/api/v1` route |
+
+Generate a key with
+`python -c "import secrets; print(secrets.token_urlsafe(32))"`. The API
+**refuses to start** without one: an API that silently runs with
+authentication disabled is worse than one that will not boot.
+
+If `sslmode` is absent from `DATABASE_URL`, `config.py` appends
+`sslmode=require` so that no connection falls back to plaintext. An `sslmode`
+you set yourself is never overwritten.
 
 `.env.example` documents the exact shape, where to find each value in the
 Supabase dashboard, and the two endpoints Supabase exposes. **`.env` is
@@ -230,10 +245,59 @@ python -m uvicorn CRM.app.main:app --reload
 | http://127.0.0.1:8000/ | health check |
 | http://127.0.0.1:8000/docs | interactive Swagger documentation |
 
+## Running the API with Docker
+
+The API — and only the API — is containerised. The seeds and the simulator
+stay outside the image: they are tooling, not part of the running service.
+
+The image is based on **`python:3.12-slim`**. The build context is the
+**repository root**, not `CRM/`, because the application is launched as
+`CRM.app.main:app` and imports `CRM.config`, so the `CRM` package has to sit
+at the root of the working directory inside the image.
+
+```bash
+docker build -t orialis-crm-api .
+```
+
+```bash
+docker run --rm -p 8000:8000 -e DATABASE_URL="..." -e CRM_API_KEY="..." orialis-crm-api
+```
+
+Two variables are required at runtime: **`DATABASE_URL`** and
+**`CRM_API_KEY`**. **No secret is baked into the image** — neither appears in
+the `Dockerfile`, in a layer, or in the image's environment; both are injected
+at run time only.
+
+The container listens on **8000** by default and reads **`$PORT`** when it is
+set, so a deployment platform that assigns a port is handled without changing
+the image.
+
+`.dockerignore` keeps `.env`, the historical SQLite database in `CRM/data/`,
+`.git`, and the Python and tooling caches out of the build context. Patterns
+are written `**/…` on purpose: a Docker pattern without `**/` only matches at
+the root of the context, so `__pycache__/` alone would not exclude
+`CRM/app/__pycache__/`.
+
+The API runs as a **non-root user** (`orialis`, uid 10001), created after the
+dependencies are installed so that the installed packages stay read-only to
+the application.
+
 ## API Endpoints
 
 The API is **read-only**: no `POST`, `PUT` or `DELETE` endpoint is exposed.
 Writes go through the scripts.
+
+Every `/api/v1` route requires the `X-API-Key` header. A missing or wrong key
+answers **401**:
+
+```bash
+curl -H "X-API-Key: $CRM_API_KEY" http://127.0.0.1:8000/api/v1/branches
+```
+
+`/`, `/docs` and `/openapi.json` stay public, so an uptime probe can reach the
+health check without holding a credential. The dependency is declared once, on
+the parent router, which is why none of the four resource modules had to be
+modified.
 
 | Endpoint | Pagination | Filters |
 |---|---|---|
@@ -333,9 +397,10 @@ is a design decision recorded for when the ingestion architecture is built.
 
 Deliberate for this version, and the honest starting point for what comes next.
 
-- **No authentication.** No API key, no token, no `X-API-Key` header: every
-  endpoint, plus `/` and `/docs`, answers to any caller. This must be
-  addressed before the API is exposed publicly.
+- **A single shared API key**, compared in constant time and rotated by
+  restarting the application. It identifies no caller and carries no scope,
+  so it cannot express per-consumer permissions or be revoked individually.
+  Adequate for one trusted downstream pipeline, not for several.
 - **No write endpoints.** The API reads; the scripts write.
 - **No deletion tracking**, so incremental extraction cannot detect a removed
   row. The usual remedy is a soft delete.
@@ -351,5 +416,5 @@ Deliberate for this version, and the honest starting point for what comes next.
 | V1 — local SQLite prototype | done |
 | V2 — PostgreSQL on Supabase | **done, current** |
 
-Identified next steps, in order of impact: API authentication, and the
-composite watermark at the ingestion layer.
+Identified next steps, in order of impact: deployment of the container, and
+the composite watermark at the ingestion layer.

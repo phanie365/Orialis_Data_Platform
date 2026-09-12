@@ -68,7 +68,60 @@ def get_database_url():
         )
 
     check_database_url(url)
-    return url
+    return ensure_sslmode(url)
+
+
+# SSL modes that actually encrypt the connection. `prefer` and `allow` fall
+# back to plaintext without telling anyone, and `disable` never encrypts.
+ENCRYPTING_SSL_MODES = {"require", "verify-ca", "verify-full"}
+
+
+def ensure_sslmode(url, default="require"):
+    """Return the URL with an sslmode that encrypts, without touching a
+    deliberate choice.
+
+    Supabase accepts unencrypted-capable connections, and libpq defaults to
+    `sslmode=prefer` - which means "encrypt if the server offers it, carry on
+    in plaintext otherwise". That is a silent downgrade, so the connection
+    string is made explicit here rather than left to a default.
+
+    Three cases:
+
+        no sslmode           -> `sslmode=require` is appended
+        an encrypting mode   -> left exactly as written
+        a weaker mode        -> left as written, with a loud warning
+
+    The last case matters: overwriting an explicit `sslmode=disable` would
+    silently undo a deliberate decision - someone tunnelling through a local
+    proxy, for instance. The warning names the risk and leaves the choice.
+
+    The URL itself is never printed, in any branch.
+    """
+    # Split on the FIRST "?" - that is where the query string starts, the
+    # same rule libpq applies. Deliberately not urlsplit(), which raises on a
+    # URL whose credentials contain square brackets.
+    base, separator, query = url.partition("?")
+
+    for parameter in query.split("&"):
+        name, _, value = parameter.partition("=")
+        if name.strip().lower() != "sslmode":
+            continue
+
+        mode = value.strip().lower()
+        if mode in ENCRYPTING_SSL_MODES:
+            return url  # already encrypting; nothing to say, nothing to do
+
+        print(f"  [warning] DATABASE_URL sets sslmode={mode!r}, which does "
+              f"not guarantee an encrypted connection. It has been left as "
+              f"written rather than silently overridden - change it to "
+              f"'{default}' unless this is intentional.")
+        return url
+
+    # No sslmode at all: add it, with the right separator depending on
+    # whether the URL already carries query parameters.
+    print(f"  [note] sslmode was missing from DATABASE_URL; connections use "
+          f"sslmode={default}.")
+    return f"{url}{'&' if separator else '?'}sslmode={default}"
 
 
 def check_database_url(url):
@@ -120,9 +173,8 @@ def check_database_url(url):
             + f"Fix it in: {ENV_PATH}"
         )
 
-    if "sslmode=" not in url:
-        print("  [note] DATABASE_URL has no 'sslmode' parameter; appending "
-              "'?sslmode=require' is recommended for Supabase.")
+    # sslmode is not checked here: `ensure_sslmode()` guarantees it instead of
+    # merely recommending it.
 
 
 # ---------------------------------------------------------------------------
