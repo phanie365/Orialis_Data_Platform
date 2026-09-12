@@ -19,3 +19,19 @@ fastapi>=0.115.0,<1.0
 #   uvicorn CRM.app.main:app --reload
 # Add the [standard] extra for faster reloads and HTTP parsing if needed.
 uvicorn>=0.34.0,<1.0
+
+# --- PostgreSQL / Supabase migration (in progress) -------------------------
+# Added ahead of the migration. Nothing imports them yet: the CRM still runs
+# on SQLite, so the code above and the scripts are unchanged for now.
+
+# PostgreSQL driver. psycopg 3, NOT psycopg2 - the two differ on a point this
+# codebase relies on heavily: in psycopg 3, cursor.execute() returns the
+# cursor, so `list(cur.execute(...))` and `for row in cur.execute(...)` work.
+# psycopg2 returns None there, which would break ~29 call sites.
+# The [binary] extra ships precompiled wheels, so no libpq or C toolchain is
+# needed locally.
+psycopg[binary]>=3.2,<4.0
+
+# Reads DATABASE_URL from a local .env file (see .env.example).
+# The .env file itself is never committed.
+python-dotenv>=1.0,<2.0

@@ -14,26 +14,34 @@ router = APIRouter(prefix="/api/v1", tags=["advisors"])
 
 
 # Maps the public query-parameter name to the SQL condition it produces.
-# Each template holds exactly one "?", which is where the caller's value is
+# Each template holds exactly one "%s", which is where the caller's value is
 # bound - the value itself is never written into the string.
 #
 # Only the SQL written HERE can ever reach the query, so a caller cannot
 # inject a column name or an operator.
 #
-# `spoken_language` is the odd one out. spoken_languages is stored as a
-# comma-separated list ("FR,EN,IT"), so the filter cannot be an equality: it
-# has to look INSIDE the text. See the note on delimiters below.
+# `spoken_language` is the odd one out, for three reasons:
+#
+#   1. spoken_languages is stored as a comma-separated list ("FR,EN,IT"), so
+#      the filter cannot be an equality: it has to look INSIDE the text.
+#      Both sides are padded with commas so that "FR" matches the whole code
+#      and never a fragment of a longer one.
+#
+#   2. ILIKE, not LIKE. SQLite's LIKE is case-insensitive for ASCII by
+#      default, so "?spoken_language=fr" used to match. PostgreSQL's LIKE is
+#      case-SENSITIVE; ILIKE preserves the previous behaviour.
+#
+#   3. The literal percent signs are written "%%". psycopg scans the query
+#      for "%s" placeholders whenever parameters are passed, so a lone "%"
+#      would be read as the start of one. The driver removes the doubling
+#      before the query reaches the server.
 FILTER_CONDITIONS = {
-    "branch_id": "branch_id = ?",
-    "advisor_status": "advisor_status = ?",
-    "specialization": "specialization = ?",
-    "spoken_language": "',' || spoken_languages || ',' LIKE '%,' || ? || ',%'",
-    "updated_since": "updated_at >= ?",
+    "branch_id": "branch_id = %s",
+    "advisor_status": "advisor_status = %s",
+    "specialization": "specialization = %s",
+    "spoken_language": "',' || spoken_languages || ',' ILIKE '%%,' || %s || ',%%'",
+    "updated_since": "updated_at >= %s",
 }
-
-# How timestamps are stored in the CRM database: "2026-09-01 14:30:00".
-# Note the SPACE between date and time, where an ISO-8601 input uses a "T".
-TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 
 def build_where_clause(filters):
@@ -42,13 +50,13 @@ def build_where_clause(filters):
     Returns the SQL fragment and the list of values to bind to it. Filters
     left empty are skipped, so the clause grows with the request:
 
-        no filter                -> ""                        []
-        branch_id=BR001          -> " WHERE branch_id = ?"     ["BR001"]
+        no filter                -> ""                         []
+        branch_id=BR001          -> " WHERE branch_id = %s"     ["BR001"]
         branch_id=BR001
-        &spoken_language=FR      -> " WHERE branch_id = ?
+        &spoken_language=FR      -> " WHERE branch_id = %s
                                        AND ',' || spoken_languages || ','
-                                           LIKE '%,' || ? || ',%'"
-                                                          ["BR001", "FR"]
+                                           ILIKE '%%,' || %s || ',%%'"
+                                                            ["BR001", "FR"]
     """
     conditions = []
     values = []
@@ -125,20 +133,15 @@ def list_advisors(
     Database columns are returned as they are, with no renaming and no
     transformation.
     """
-    # Rendered into the exact string format used by the database, so SQLite
-    # compares two strings written the same way. Sending the ISO form
-    # ("...T00:00:00") would compare a "T" against a space and silently drop
-    # valid rows.
-    updated_since_value = (
-        updated_since.strftime(TIMESTAMP_FORMAT) if updated_since else None
-    )
-
+    # No string conversion: `updated_at` is a real TIMESTAMPTZ, and FastAPI
+    # already parsed the query parameter into a datetime. psycopg adapts the
+    # object directly, so the space-versus-"T" trap of the text era is gone.
     where_sql, where_values = build_where_clause({
         "branch_id": branch_id,
         "advisor_status": advisor_status,
         "specialization": specialization,
         "spoken_language": spoken_language,
-        "updated_since": updated_since_value,
+        "updated_since": updated_since,
     })
 
     # Page 1 starts at row 0, page 2 at row `page_size`, and so on.
@@ -146,17 +149,22 @@ def list_advisors(
 
     with get_connection() as connection:
         # How many advisors match the filters, ignoring pagination. COUNT(*)
-        # is computed by SQLite, so no row is transferred to Python for it.
+        # is computed by the server, so no row is transferred to Python.
+        #
+        # The aggregate gets an explicit alias: rows come back as
+        # dictionaries (dict_row), so there is no row[0] to read, and
+        # relying on the driver's default name for an unnamed expression
+        # would be guesswork.
         total_records = connection.execute(
-            f"SELECT COUNT(*) FROM advisors{where_sql}",
+            f"SELECT COUNT(*) AS total FROM advisors{where_sql}",
             where_values,
-        ).fetchone()[0]
+        ).fetchone()["total"]
 
         # Only the requested page leaves the database. ORDER BY makes the
-        # paging stable: without it, SQLite is free to return rows in any
+        # paging stable: without it the server is free to return rows in any
         # order and an advisor could appear on two pages, or on none.
         rows = connection.execute(
-            f"SELECT * FROM advisors{where_sql} ORDER BY advisor_id LIMIT ? OFFSET ?",
+            f"SELECT * FROM advisors{where_sql} ORDER BY advisor_id LIMIT %s OFFSET %s",
             where_values + [page_size, offset],
         ).fetchall()
 
@@ -197,7 +205,7 @@ def get_advisor(
         # The id is a bound parameter, never glued into the SQL string.
         # fetchone() returns a single row, or None if nothing matched.
         row = connection.execute(
-            "SELECT * FROM advisors WHERE advisor_id = ?",
+            "SELECT * FROM advisors WHERE advisor_id = %s",
             (advisor_id,),
         ).fetchone()
 

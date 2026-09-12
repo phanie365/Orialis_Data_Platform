@@ -33,10 +33,6 @@ FILTER_COLUMNS = {
     "updated_since": ("updated_at", ">="),
 }
 
-# How timestamps are stored in the CRM database: "2026-09-01 14:30:00".
-# Note the SPACE between date and time, where an ISO-8601 input uses a "T".
-TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M:%S"
-
 
 def build_where_clause(filters):
     """Build the WHERE clause from the filters that were actually provided.
@@ -46,16 +42,16 @@ def build_where_clause(filters):
     Filters left empty are skipped, so the clause grows with the request:
 
         no filter                      -> ""                       []
-        country=France                 -> " WHERE country_of_residence = ?"
+        country=France                 -> " WHERE country_of_residence = %s"
                                                                    ["France"]
         country=France&segment=Standard
-                                       -> " WHERE country_of_residence = ?
-                                             AND client_segment = ?"
+                                       -> " WHERE country_of_residence = %s
+                                             AND client_segment = %s"
                                                        ["France", "Standard"]
 
     Note what is and is not inserted into the string: the COLUMN NAME comes
     from FILTER_COLUMNS, which we control. The VALUE never does - it is
-    replaced by a "?" placeholder and passed to SQLite separately.
+    replaced by a "%s" placeholder and passed to the server separately.
     """
     conditions = []
     values = []
@@ -64,7 +60,7 @@ def build_where_clause(filters):
         if value is None:
             continue
         column, operator = FILTER_COLUMNS[parameter_name]
-        conditions.append(f"{column} {operator} ?")
+        conditions.append(f"{column} {operator} %s")
         values.append(value)
 
     if not conditions:
@@ -139,22 +135,19 @@ def list_clients(
     Database columns are returned as they are, with no renaming and no
     transformation.
     """
-    # FastAPI hands us a real datetime object. It is rendered into the exact
-    # string format used by the database, so SQLite compares two strings
-    # written the same way. Passing the datetime object straight through
-    # would send "2026-09-01T00:00:00" - with a "T" - and "T" sorts after a
-    # space, so the comparison would silently drop valid rows.
-    updated_since_value = (
-        updated_since.strftime(TIMESTAMP_FORMAT) if updated_since else None
-    )
-
+    # FastAPI hands us a real datetime object, and `updated_at` is a real
+    # TIMESTAMPTZ, so it goes straight to the server: psycopg adapts the
+    # object itself. The text era needed a strftime() here, because comparing
+    # the ISO form ("...T00:00:00") against the stored form ("... 00:00:00")
+    # compared a "T" with a space and silently dropped valid rows. With a
+    # typed column that whole class of bug is gone.
     where_sql, where_values = build_where_clause({
         "country": country,
         "segment": segment,
         "risk_profile": risk_profile,
         "client_status": client_status,
         "advisor_id": advisor_id,
-        "updated_since": updated_since_value,
+        "updated_since": updated_since,
     })
 
     # Page 1 starts at row 0, page 2 at row `page_size`, and so on.
@@ -162,17 +155,22 @@ def list_clients(
 
     with get_connection() as connection:
         # How many clients match the filters, ignoring pagination. COUNT(*)
-        # is computed by SQLite, so no row is transferred to Python for it.
+        # is computed by the server, so no row is transferred to Python.
+        #
+        # The aggregate gets an explicit alias: rows come back as
+        # dictionaries (dict_row), so there is no row[0] to read, and
+        # relying on the driver's default name for an unnamed expression
+        # would be guesswork.
         total_records = connection.execute(
-            f"SELECT COUNT(*) FROM clients{where_sql}",
+            f"SELECT COUNT(*) AS total FROM clients{where_sql}",
             where_values,
-        ).fetchone()[0]
+        ).fetchone()["total"]
 
         # Only the requested page leaves the database. ORDER BY makes the
-        # paging stable: without it, SQLite is free to return rows in any
+        # paging stable: without it the server is free to return rows in any
         # order and a client could appear on two pages, or on none.
         rows = connection.execute(
-            f"SELECT * FROM clients{where_sql} ORDER BY client_id LIMIT ? OFFSET ?",
+            f"SELECT * FROM clients{where_sql} ORDER BY client_id LIMIT %s OFFSET %s",
             where_values + [page_size, offset],
         ).fetchall()
 
@@ -217,7 +215,7 @@ def get_client(
         # string - same rule as every other query in this router.
         # fetchone() returns a single row, or None if nothing matched.
         row = connection.execute(
-            "SELECT * FROM clients WHERE client_id = ?",
+            "SELECT * FROM clients WHERE client_id = %s",
             (client_id,),
         ).fetchone()
 

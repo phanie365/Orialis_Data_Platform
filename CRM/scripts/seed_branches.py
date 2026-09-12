@@ -1,5 +1,5 @@
 """
-Seed the `branches` table of the Orialis CRM.
+Seed the `branches` table of the Orialis CRM (PostgreSQL / Supabase).
 
 Inserts the 7 Orialis branches across the CRM geographic scope:
 France, Belgium, Switzerland, Italy.
@@ -8,20 +8,27 @@ This script is safe to re-run: it uses an UPSERT keyed on branch_id, so
 running it twice never creates duplicates. If a branch already exists,
 its values are refreshed instead of being inserted again.
 
+Connection: the DATABASE_URL variable is read from the `.env` file at the
+repository root. That value is never printed.
+
 Prerequisite:
-    python CRM/scripts/init_db.py   (creates the database and its tables)
+    python CRM/scripts/init_db.py   (creates the tables)
 
 Usage:
     python CRM/scripts/seed_branches.py
 """
 
-import sqlite3
+import sys
 from pathlib import Path
 
-# Same path logic as init_db.py: derived from this file, not from the
-# current working directory.
-CRM_DIR = Path(__file__).parent.parent
-DB_PATH = CRM_DIR / "data" / "orialis_crm.db"
+import psycopg
+
+# Shared PostgreSQL configuration: .env loading, DATABASE_URL retrieval and
+# validation, credential scrubbing. It lives at CRM/config.py, used by both
+# the API and these scripts. The repository root goes on the import path so
+# that `CRM.config` resolves the same way it does for the API.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+from CRM.config import get_database_url, scrub  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -33,6 +40,7 @@ DB_PATH = CRM_DIR / "data" / "orialis_crm.db"
 #
 # Note: the status column is named `branch_status` (not `status`) since the
 # schema rename. All values are in English; timezones use IANA identifiers.
+# Unchanged from the SQLite version - the same 7 branches, same values.
 
 BRANCHES = [
     ("BR001", "Orialis Paris",     "Paris",     "France",      "Ile-de-France",           "Europe/Paris",    "Active"),
@@ -52,14 +60,18 @@ BRANCHES = [
 # row with the same branch_id already exists, update it instead of failing.
 # This is what makes the script re-runnable without duplicates.
 #
-# The "?" are placeholders: values are passed separately to SQLite rather
-# than glued into the SQL string. This is the correct way to pass data.
+# This is native PostgreSQL syntax - SQLite borrowed it from PostgreSQL, so
+# the statement carries over unchanged apart from the placeholders.
+#
+# The "%s" are placeholders: values are passed separately to the server
+# rather than glued into the SQL string. This is the correct way to pass
+# data. (SQLite used "?"; psycopg uses "%s", whatever the value's type.)
 
 UPSERT_BRANCH = """
 INSERT INTO branches (
     branch_id, branch_name, city, country, region, timezone, branch_status
 )
-VALUES (?, ?, ?, ?, ?, ?, ?)
+VALUES (%s, %s, %s, %s, %s, %s, %s)
 ON CONFLICT (branch_id) DO UPDATE SET
     branch_name   = excluded.branch_name,
     city          = excluded.city,
@@ -73,46 +85,60 @@ ON CONFLICT (branch_id) DO UPDATE SET
 def seed_branches():
     """Insert or refresh the Orialis branches."""
 
-    if not DB_PATH.exists():
+    database_url = get_database_url()
+
+    # No PRAGMA here: PostgreSQL always enforces foreign keys. And no check
+    # that a database file exists - there is no file any more; a missing
+    # table is reported below instead.
+    try:
+        connection = psycopg.connect(database_url)
+    except psycopg.OperationalError as error:
         raise SystemExit(
-            f"Database not found: {DB_PATH}\n"
-            f"Run 'python CRM/scripts/init_db.py' first."
+            "Could not connect to PostgreSQL.\n"
+            f"  {scrub(error, database_url)}"
         )
 
-    connection = sqlite3.connect(DB_PATH)
     try:
-        cursor = connection.cursor()
+        with connection.cursor() as cursor:
+            # Read the ids already present, so we can report what was newly
+            # inserted versus what was refreshed.
+            try:
+                cursor.execute("SELECT branch_id FROM branches")
+            except psycopg.errors.UndefinedTable:
+                connection.rollback()
+                raise SystemExit(
+                    "The `branches` table does not exist.\n"
+                    "Run 'python CRM/scripts/init_db.py' first."
+                )
+            existing_ids = {row[0] for row in cursor.fetchall()}
 
-        # SQLite does not enforce foreign keys unless asked, on every
-        # connection. `branches` has none, but we stay consistent.
-        cursor.execute("PRAGMA foreign_keys = ON;")
+            inserted, updated = 0, 0
+            for branch in BRANCHES:
+                branch_id, branch_name = branch[0], branch[1]
 
-        # Read the ids already present, so we can report what was newly
-        # inserted versus what was refreshed.
-        existing_ids = {row[0] for row in cursor.execute("SELECT branch_id FROM branches")}
+                cursor.execute(UPSERT_BRANCH, branch)
 
-        inserted, updated = 0, 0
-        for branch in BRANCHES:
-            branch_id, branch_name = branch[0], branch[1]
+                if branch_id in existing_ids:
+                    updated += 1
+                    print(f"  [=] {branch_id}  {branch_name:20} already present, refreshed")
+                else:
+                    inserted += 1
+                    print(f"  [+] {branch_id}  {branch_name:20} inserted")
 
-            cursor.execute(UPSERT_BRANCH, branch)
+            connection.commit()
 
-            if branch_id in existing_ids:
-                updated += 1
-                print(f"  [=] {branch_id}  {branch_name:20} already present, refreshed")
-            else:
-                inserted += 1
-                print(f"  [+] {branch_id}  {branch_name:20} inserted")
-
-        connection.commit()
-
-        # Read the table back to confirm what is actually stored.
-        rows = list(cursor.execute("""
-            SELECT branch_id, branch_name, city, country, timezone, branch_status
-            FROM branches
-            ORDER BY branch_id
-        """))
+            # Read the table back to confirm what is actually stored.
+            cursor.execute("""
+                SELECT branch_id, branch_name, city, country, timezone, branch_status
+                FROM branches
+                ORDER BY branch_id
+            """)
+            rows = cursor.fetchall()
+    except psycopg.Error as error:
+        connection.rollback()
+        raise SystemExit(f"Seeding failed: {scrub(error, database_url)}")
     finally:
+        # "finally": the connection is closed even if an error occurs.
         connection.close()
 
     print()

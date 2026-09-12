@@ -27,12 +27,19 @@ Usage:
 """
 
 import random
-import sqlite3
-from datetime import datetime, timedelta
+import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-CRM_DIR = Path(__file__).parent.parent
-DB_PATH = CRM_DIR / "data" / "orialis_crm.db"
+import psycopg
+from psycopg.rows import dict_row
+
+# Shared PostgreSQL configuration: .env loading, DATABASE_URL retrieval and
+# validation, credential scrubbing. It lives at CRM/config.py, used by both
+# the API and these scripts. The repository root goes on the import path so
+# that `CRM.config` resolves the same way it does for the API.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+from CRM.config import get_database_url, scrub  # noqa: E402
 
 # No fixed seed: every run must differ. This is the opposite of the seed
 # scripts, which pin a seed to stay reproducible.
@@ -224,16 +231,22 @@ def simulation_instant(cursor):
     days are replayed faster than real time the stamps run slightly ahead of
     the clock - which is exactly what a compressed simulation should do.
     """
-    now = datetime.now().replace(microsecond=0)
+    # UTC-aware: both columns are TIMESTAMPTZ, so psycopg returns aware
+    # datetimes. A naive `now` could not be compared with them.
+    now = datetime.now(timezone.utc).replace(microsecond=0)
 
     stored = [
-        cursor.execute("SELECT MAX(created_at) FROM interactions").fetchone()[0],
-        cursor.execute("SELECT MAX(updated_at) FROM clients").fetchone()[0],
+        cursor.execute(
+            "SELECT MAX(created_at) AS latest FROM interactions"
+        ).fetchone()["latest"],
+        cursor.execute(
+            "SELECT MAX(updated_at) AS latest FROM clients"
+        ).fetchone()["latest"],
     ]
     for value in stored:
         if value:
-            floor = datetime.strptime(value, "%Y-%m-%d %H:%M:%S") + timedelta(seconds=1)
-            now = max(now, floor)
+            # No strptime: the driver already hands back a datetime.
+            now = max(now, value + timedelta(seconds=1))
 
     return now
 
@@ -246,8 +259,9 @@ def next_interaction_ids(cursor, count):
     Only the largest existing number matters.
     """
     highest = cursor.execute(
-        "SELECT MAX(CAST(SUBSTR(interaction_id, 4) AS INTEGER)) FROM interactions"
-    ).fetchone()[0] or 0
+        "SELECT MAX(CAST(SUBSTR(interaction_id, 4) AS INTEGER)) AS highest "
+        "FROM interactions"
+    ).fetchone()["highest"] or 0
 
     return [f"INT{highest + offset:06d}" for offset in range(1, count + 1)]
 
@@ -270,15 +284,12 @@ def generate_interactions(cursor, now):
     # BELOW the existing maximum: the watermark would stop moving forward
     # and an incremental pipeline would silently miss the whole batch.
     latest_written = cursor.execute(
-        "SELECT MAX(created_at) FROM interactions"
-    ).fetchone()[0]
+        "SELECT MAX(created_at) AS latest FROM interactions"
+    ).fetchone()["latest"]
     # One second PAST the last row, not level with it: a row written exactly
     # on the watermark would be re-read on every later extraction instead of
-    # being counted as new.
-    floor = (
-        datetime.strptime(latest_written, "%Y-%m-%d %H:%M:%S") + timedelta(seconds=1)
-        if latest_written else None
-    )
+    # being counted as new. No strptime: the driver returns a datetime.
+    floor = latest_written + timedelta(seconds=1) if latest_written else None
 
     # Soft weighting: nobody is excluded, but an active Private Banking
     # client is roughly 28 times more likely to come up than an inactive
@@ -317,12 +328,12 @@ def generate_interactions(cursor, now):
             interaction_id,
             client["client_id"],
             client["advisor_id"],          # always the client's own advisor
-            interaction_date.strftime("%Y-%m-%d %H:%M:%S"),
+            interaction_date,                 # TIMESTAMPTZ, real datetime
             interaction_type,
             weighted_pick(CHANNEL_BY_TYPE[interaction_type]),
             weighted_pick(SUBJECT_BY_TYPE[interaction_type]),
             weighted_pick(OUTCOME_BY_TYPE[interaction_type]),
-            created_at.strftime("%Y-%m-%d %H:%M:%S"),
+            created_at,                       # TIMESTAMPTZ, real datetime
         ))
 
     return rows
@@ -341,7 +352,9 @@ def update_clients(cursor, now):
 
     # `now` is the simulation instant, already guaranteed to sit past every
     # timestamp already stored (see simulation_instant).
-    timestamp = now.strftime("%Y-%m-%d %H:%M:%S")
+    # A real datetime, not a formatted string: `updated_at` is TIMESTAMPTZ
+    # and psycopg adapts the object directly.
+    timestamp = now
     count = rng.randint(*CLIENT_UPDATES_PER_DAY)
 
     # A client is picked at most once per day, hence ORDER BY RANDOM() with
@@ -352,7 +365,7 @@ def update_clients(cursor, now):
         FROM clients c
         JOIN advisors a ON a.advisor_id = c.advisor_id
         ORDER BY RANDOM()
-        LIMIT ?
+        LIMIT %s
     """, (count,)).fetchall()
 
     changes = {"phone": 0, "risk_profile": 0, "preferred_language": 0,
@@ -387,7 +400,7 @@ def update_clients(cursor, now):
         # The column name comes from UPDATE_KIND_WEIGHTS, which we control;
         # the value and the id are bound parameters.
         cursor.execute(
-            f"UPDATE clients SET {kind} = ?, updated_at = ? WHERE client_id = ?",
+            f"UPDATE clients SET {kind} = %s, updated_at = %s WHERE client_id = %s",
             (new_value, timestamp, client["client_id"]),
         )
 
@@ -406,62 +419,64 @@ def update_clients(cursor, now):
 def run_checks(cursor, new_ids, updated_ids, timestamp, client_timestamp):
     """Run the 7 integrity checks. Returns a list of (label, error count)."""
 
-    placeholders = ",".join("?" for _ in new_ids)
-
+    # `= ANY(%s)` takes the whole id list as ONE array parameter. SQLite
+    # needed a generated "?,?,?,..." string here.
     checks = [
-        ("1. new interactions with an unknown client_id", f"""
-            SELECT COUNT(*) FROM interactions i
+        ("1. new interactions with an unknown client_id", """
+            SELECT COUNT(*) AS n FROM interactions i
             LEFT JOIN clients c ON c.client_id = i.client_id
-            WHERE i.interaction_id IN ({placeholders}) AND c.client_id IS NULL
-        """, list(new_ids)),
-        ("2. new interactions with an unknown advisor_id", f"""
-            SELECT COUNT(*) FROM interactions i
+            WHERE i.interaction_id = ANY(%s) AND c.client_id IS NULL
+        """, (list(new_ids),)),
+        ("2. new interactions with an unknown advisor_id", """
+            SELECT COUNT(*) AS n FROM interactions i
             LEFT JOIN advisors a ON a.advisor_id = i.advisor_id
-            WHERE i.interaction_id IN ({placeholders}) AND a.advisor_id IS NULL
-        """, list(new_ids)),
-        ("3. new interactions not using the client's advisor", f"""
-            SELECT COUNT(*) FROM interactions i
+            WHERE i.interaction_id = ANY(%s) AND a.advisor_id IS NULL
+        """, (list(new_ids),)),
+        ("3. new interactions not using the client's advisor", """
+            SELECT COUNT(*) AS n FROM interactions i
             JOIN clients c ON c.client_id = i.client_id
-            WHERE i.interaction_id IN ({placeholders})
+            WHERE i.interaction_id = ANY(%s)
               AND i.advisor_id <> c.advisor_id
-        """, list(new_ids)),
+        """, (list(new_ids),)),
+        # PostgreSQL requires an alias on a subquery in FROM; SQLite did not.
         ("4. duplicate interaction_id in the whole table", """
-            SELECT COUNT(*) FROM (
+            SELECT COUNT(*) AS n FROM (
                 SELECT interaction_id FROM interactions
                 GROUP BY interaction_id HAVING COUNT(*) > 1
-            )
-        """, []),
+            ) AS duplicates
+        """, None),
         ("5. interaction timestamps in the future", """
-            SELECT COUNT(*) FROM interactions
-            WHERE interaction_date > ? OR created_at > ?
-        """, [timestamp, timestamp]),
+            SELECT COUNT(*) AS n FROM interactions
+            WHERE interaction_date > %s OR created_at > %s
+        """, (timestamp, timestamp)),
     ]
 
     results = []
     for label, query, parameters in checks:
-        results.append((label, cursor.execute(query, parameters).fetchone()[0]))
+        results.append((label, cursor.execute(query, parameters).fetchone()["n"]))
 
     # 6. Every client touched this run carries the simulation timestamp.
     if updated_ids:
-        placeholders = ",".join("?" for _ in updated_ids)
         value = cursor.execute(
-            f"SELECT COUNT(*) FROM clients "
-            f"WHERE client_id IN ({placeholders}) AND updated_at <> ?",
-            list(updated_ids) + [client_timestamp],
-        ).fetchone()[0]
+            "SELECT COUNT(*) AS n FROM clients "
+            "WHERE client_id = ANY(%s) AND updated_at <> %s",
+            (list(updated_ids), client_timestamp),
+        ).fetchone()["n"]
     else:
         value = 0
     results.append(("6. updated clients missing the simulation timestamp", value))
 
     # 7. Nobody, anywhere, ended up with an advisor who cannot speak to them.
+    # No parameters here, so the literal '%' of the LIKE pattern needs no
+    # escaping: psycopg only looks for placeholders when values are passed.
     results.append((
         "7. clients whose language their advisor does not speak",
         cursor.execute("""
-            SELECT COUNT(*) FROM clients c
+            SELECT COUNT(*) AS n FROM clients c
             JOIN advisors a ON a.advisor_id = c.advisor_id
             WHERE ',' || a.spoken_languages || ','
                   NOT LIKE '%,' || c.preferred_language || ',%'
-        """).fetchone()[0],
+        """).fetchone()["n"],
     ))
 
     return results
@@ -474,69 +489,84 @@ def run_checks(cursor, new_ids, updated_ids, timestamp, client_timestamp):
 def simulate_daily_activity():
     """Run one simulated business day, inside a single transaction."""
 
-    if not DB_PATH.exists():
+    database_url = get_database_url()
+
+    # No PRAGMA here: PostgreSQL always enforces foreign keys.
+    #
+    # dict_row replaces sqlite3.Row for the named column access this module
+    # relies on. Unlike sqlite3.Row it does NOT also support row[0], which is
+    # why every aggregate below is given an explicit alias.
+    try:
+        connection = psycopg.connect(database_url, row_factory=dict_row)
+    except psycopg.OperationalError as error:
         raise SystemExit(
-            f"Database not found: {DB_PATH}\n"
-            f"Run 'python CRM/scripts/init_db.py' first."
+            "Could not connect to PostgreSQL.\n"
+            f"  {scrub(error, database_url)}"
         )
 
-    connection = sqlite3.connect(DB_PATH)
-    connection.row_factory = sqlite3.Row
     try:
-        cursor = connection.cursor()
-        cursor.execute("PRAGMA foreign_keys = ON;")
-
-        now = simulation_instant(cursor)
-        timestamp = now.strftime("%Y-%m-%d %H:%M:%S")
-
-        # Everything below happens inside ONE transaction. SQLite opens it
-        # on the first write; nothing is visible to anyone else until the
-        # commit, and any failure rolls the whole day back.
-        try:
-            interactions = generate_interactions(cursor, now)
-            cursor.executemany("""
-                INSERT INTO interactions (
-                    interaction_id, client_id, advisor_id, interaction_date,
-                    interaction_type, channel, subject, outcome, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, interactions)
-
-            updated_ids, changes, client_timestamp = update_clients(cursor, now)
-
-            new_ids = [row[0] for row in interactions]
-            checks = run_checks(
-                cursor, new_ids, updated_ids, timestamp, client_timestamp
-            )
-
-            failures = sum(count for _, count in checks)
-            if failures:
-                raise sqlite3.IntegrityError(
-                    f"{failures} integrity error(s) detected; rolling back."
+        with connection.cursor() as cursor:
+            try:
+                now = simulation_instant(cursor)
+            except psycopg.errors.UndefinedTable:
+                connection.rollback()
+                raise SystemExit(
+                    "The CRM tables do not exist.\n"
+                    "Run 'python CRM/scripts/init_db.py' first."
                 )
 
-            connection.commit()
-        except Exception:
-            # A half-applied day is worse than no day at all.
-            connection.rollback()
-            raise
+            # A real datetime, not a formatted string: every timestamp column
+            # is TIMESTAMPTZ.
+            timestamp = now
 
-        report(cursor, now, timestamp, new_ids, updated_ids, changes, checks)
+            # Everything below happens inside ONE transaction. psycopg opens
+            # it on the first statement; nothing is visible to anyone else
+            # until the commit, and any failure rolls the whole day back.
+            try:
+                interactions = generate_interactions(cursor, now)
+                cursor.executemany("""
+                    INSERT INTO interactions (
+                        interaction_id, client_id, advisor_id, interaction_date,
+                        interaction_type, channel, subject, outcome, created_at
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """, interactions)
+
+                updated_ids, changes, client_timestamp = update_clients(cursor, now)
+
+                new_ids = [row[0] for row in interactions]
+                checks = run_checks(
+                    cursor, new_ids, updated_ids, timestamp, client_timestamp
+                )
+
+                failures = sum(count for _, count in checks)
+                if failures:
+                    raise psycopg.IntegrityError(
+                        f"{failures} integrity error(s) detected; rolling back."
+                    )
+
+                connection.commit()
+            except Exception:
+                # A half-applied day is worse than no day at all.
+                connection.rollback()
+                raise
+
+            report(cursor, now, timestamp, new_ids, updated_ids, changes, checks)
     finally:
+        # "finally": the connection is closed even if an error occurs.
         connection.close()
-
 
 def report(cursor, now, timestamp, new_ids, updated_ids, changes, checks):
     """Print what the simulated day changed."""
 
     total_interactions = cursor.execute(
-        "SELECT COUNT(*) FROM interactions"
-    ).fetchone()[0]
+        "SELECT COUNT(*) AS n FROM interactions"
+    ).fetchone()["n"]
     latest_created = cursor.execute(
-        "SELECT MAX(created_at) FROM interactions"
-    ).fetchone()[0]
+        "SELECT MAX(created_at) AS latest FROM interactions"
+    ).fetchone()["latest"]
     latest_updated = cursor.execute(
-        "SELECT MAX(updated_at) FROM clients"
-    ).fetchone()[0]
+        "SELECT MAX(updated_at) AS latest FROM clients"
+    ).fetchone()["latest"]
 
     print(f"Simulated business day: {timestamp}")
     print()

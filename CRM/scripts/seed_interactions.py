@@ -34,18 +34,30 @@ Usage:
 """
 
 import random
-import sqlite3
-from datetime import datetime, timedelta
+import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-CRM_DIR = Path(__file__).parent.parent
-DB_PATH = CRM_DIR / "data" / "orialis_crm.db"
+import psycopg
+
+# Shared PostgreSQL configuration: .env loading, DATABASE_URL retrieval and
+# validation, credential scrubbing. It lives at CRM/config.py, used by both
+# the API and these scripts. The repository root goes on the import path so
+# that `CRM.config` resolves the same way it does for the API.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+from CRM.config import get_database_url, scrub  # noqa: E402
 
 RNG_SEED = 20260911
 
 # Reference "now". Hardcoded rather than read from the clock, so the dataset
 # does not drift over time.
-NOW = datetime(2026, 9, 9, 18, 0, 0)
+#
+# UTC-aware, not naive: `clients.created_at` is a TIMESTAMPTZ, so psycopg
+# hands it back as an aware datetime. Mixing aware and naive values raises
+# TypeError on the first subtraction, so the whole module works in UTC -
+# which is also the session time zone, so the wall-clock values are the same
+# ones the SQLite version computed.
+NOW = datetime(2026, 9, 9, 18, 0, 0, tzinfo=timezone.utc)
 
 TOTAL_INTERACTIONS = 30000
 
@@ -313,7 +325,9 @@ def load_clients(cursor):
             "advisor_id": advisor_id,
             "segment": segment,
             "status": status,
-            "created_at": datetime.strptime(created_at, "%Y-%m-%d %H:%M:%S"),
+            # No strptime: the column is TIMESTAMPTZ, so psycopg returns an
+            # aware datetime directly.
+            "created_at": created_at,
         }
         for client_id, advisor_id, segment, status, created_at in rows
     ]
@@ -390,12 +404,18 @@ def generate_interactions(rng, clients, counts):
             f"INT{index + 1:06d}",
             row["client_id"],
             row["advisor_id"],
-            row["interaction_date"].strftime("%Y-%m-%d %H:%M:%S"),
+            # Real datetimes for the TIMESTAMPTZ columns, truncated to the
+            # second. The offsets are computed in fractional seconds, so the
+            # values carry microseconds; SQLite dropped them when formatting
+            # to text, and the rest of the CRM is stored to the second.
+            # Truncating HERE, after the sort above, keeps the chronological
+            # numbering identical to the original dataset.
+            row["interaction_date"].replace(microsecond=0),
             row["interaction_type"],
             row["channel"],
             row["subject"],
             row["outcome"],
-            row["created_at"].strftime("%Y-%m-%d %H:%M:%S"),
+            row["created_at"].replace(microsecond=0),
         )
         for index, row in enumerate(rows)
     ]
@@ -410,7 +430,7 @@ INSERT INTO interactions (
     interaction_id, client_id, advisor_id, interaction_date,
     interaction_type, channel, subject, outcome, created_at
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
 ON CONFLICT (interaction_id) DO UPDATE SET
     client_id        = excluded.client_id,
     advisor_id       = excluded.advisor_id,
@@ -426,58 +446,79 @@ ON CONFLICT (interaction_id) DO UPDATE SET
 def seed_interactions():
     """Generate and store the 30,000 interactions, then verify the result."""
 
-    if not DB_PATH.exists():
-        raise SystemExit(
-            f"Database not found: {DB_PATH}\n"
-            f"Run 'python CRM/scripts/init_db.py' first."
-        )
-
     rng = random.Random(RNG_SEED)
+    database_url = get_database_url()
 
-    connection = sqlite3.connect(DB_PATH)
+    # No PRAGMA here: PostgreSQL always enforces foreign keys, so an
+    # interaction pointing at a missing client or advisor is rejected by the
+    # server.
     try:
-        cursor = connection.cursor()
-        cursor.execute("PRAGMA foreign_keys = ON;")
+        connection = psycopg.connect(database_url)
+    except psycopg.OperationalError as error:
+        raise SystemExit(
+            "Could not connect to PostgreSQL.\n"
+            f"  {scrub(error, database_url)}"
+        )
 
-        clients = load_clients(cursor)
-        if not clients:
-            raise SystemExit(
-                "The `clients` table is empty.\n"
-                "Run 'python CRM/scripts/seed_clients.py' first."
+    try:
+        with connection.cursor() as cursor:
+            try:
+                clients = load_clients(cursor)
+            except psycopg.errors.UndefinedTable:
+                connection.rollback()
+                raise SystemExit(
+                    "The `clients` table does not exist.\n"
+                    "Run 'python CRM/scripts/init_db.py' first."
+                )
+
+            if not clients:
+                raise SystemExit(
+                    "The `clients` table is empty.\n"
+                    "Run 'python CRM/scripts/seed_clients.py' first."
+                )
+
+            counts = allocate_interactions(rng, clients)
+            interactions = generate_interactions(rng, clients, counts)
+            wanted_ids = [row[0] for row in interactions]
+
+            # Remove interactions left over from an earlier dataset, so the
+            # table ends up with exactly 30,000 rows and never 60,000.
+            #
+            # SQLite needed a temporary table here, because a
+            # 30,000-placeholder "IN (?,?,?,...)" clause exceeds its variable
+            # limit. PostgreSQL takes the whole list as ONE array parameter,
+            # so the staging table is gone and the delete is one statement.
+            cursor.execute(
+                "DELETE FROM interactions WHERE NOT (interaction_id = ANY(%s))",
+                (wanted_ids,),
             )
+            removed = cursor.rowcount
 
-        counts = allocate_interactions(rng, clients)
-        interactions = generate_interactions(rng, clients, counts)
+            existing_ids = {
+                row[0] for row in cursor.execute("SELECT interaction_id FROM interactions")
+            }
 
-        # Remove interactions left over from an earlier dataset, so the table
-        # ends up with exactly 30,000 rows and never 60,000. A temp table
-        # avoids a 30,000-placeholder IN (...) clause.
-        cursor.execute("CREATE TEMP TABLE wanted_ids (interaction_id TEXT PRIMARY KEY)")
-        cursor.executemany(
-            "INSERT INTO wanted_ids (interaction_id) VALUES (?)",
-            [(row[0],) for row in interactions],
-        )
-        cursor.execute("""
-            DELETE FROM interactions
-            WHERE interaction_id NOT IN (SELECT interaction_id FROM wanted_ids)
-        """)
-        removed = cursor.rowcount
+            # executemany() sends the whole batch in pipeline mode on
+            # PostgreSQL 14+, so the 30,000 rows do NOT cost 30,000 network
+            # round trips.
+            cursor.executemany(UPSERT_INTERACTION, interactions)
 
-        existing_ids = {row[0] for row in cursor.execute("SELECT interaction_id FROM interactions")}
-        cursor.executemany(UPSERT_INTERACTION, interactions)
+            inserted = sum(1 for row in interactions if row[0] not in existing_ids)
+            updated = len(interactions) - inserted
 
-        inserted = sum(1 for row in interactions if row[0] not in existing_ids)
-        updated = len(interactions) - inserted
+            connection.commit()
 
-        connection.commit()
-
-        print(
-            f"Interactions seeded: {inserted} inserted, {updated} refreshed, "
-            f"{removed} removed."
-        )
-        print()
-        report(cursor)
+            print(
+                f"Interactions seeded: {inserted} inserted, {updated} refreshed, "
+                f"{removed} removed."
+            )
+            print()
+            report(cursor)
+    except psycopg.Error as error:
+        connection.rollback()
+        raise SystemExit(f"Seeding failed: {scrub(error, database_url)}")
     finally:
+        # "finally": the connection is closed even if an error occurs.
         connection.close()
 
 

@@ -33,13 +33,19 @@ Usage:
 """
 
 import random
-import sqlite3
+import sys
 import unicodedata
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-CRM_DIR = Path(__file__).parent.parent
-DB_PATH = CRM_DIR / "data" / "orialis_crm.db"
+import psycopg
+
+# Shared PostgreSQL configuration: .env loading, DATABASE_URL retrieval and
+# validation, credential scrubbing. It lives at CRM/config.py, used by both
+# the API and these scripts. The repository root goes on the import path so
+# that `CRM.config` resolves the same way it does for the API.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+from CRM.config import get_database_url, scrub  # noqa: E402
 
 # Fixed seed => same 5,000 clients on every run.
 RNG_SEED = 20260910
@@ -606,7 +612,7 @@ def generate_clients(advisors, rng):
             "last_name": last_name,
             "email": email,
             "phone": phone,
-            "birth_date": birth_date.isoformat(),
+            "birth_date": birth_date,          # DATE column, real date object
             "country": country,
             "city": city,
             "nationality": nationality,
@@ -720,10 +726,10 @@ def build_timestamps(rng, status):
     if updated < created:
         updated = created
 
-    return (
-        created.strftime("%Y-%m-%d %H:%M:%S"),
-        updated.strftime("%Y-%m-%d %H:%M:%S"),
-    )
+    # Returned as real datetimes, not formatted strings: both columns are
+    # TIMESTAMPTZ and psycopg adapts the objects directly. The session runs
+    # in UTC, so a naive value is read as UTC.
+    return created, updated
 
 
 def pick_advisor(rng, advisors, advisors_by_country, country, city, language, segment):
@@ -778,7 +784,7 @@ INSERT INTO clients (
     client_segment, risk_profile, advisor_id, created_at, updated_at,
     client_status
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
 ON CONFLICT (client_id) DO UPDATE SET
     first_name           = excluded.first_name,
     last_name            = excluded.last_name,
@@ -801,56 +807,75 @@ ON CONFLICT (client_id) DO UPDATE SET
 def seed_clients():
     """Generate and store the 5,000 Orialis clients, then verify the result."""
 
-    if not DB_PATH.exists():
-        raise SystemExit(
-            f"Database not found: {DB_PATH}\n"
-            f"Run 'python CRM/scripts/init_db.py' first."
-        )
-
     rng = random.Random(RNG_SEED)
+    database_url = get_database_url()
 
-    connection = sqlite3.connect(DB_PATH)
+    # No PRAGMA here: PostgreSQL always enforces foreign keys, so a client
+    # pointing at a missing advisor is rejected by the server.
     try:
-        cursor = connection.cursor()
-        cursor.execute("PRAGMA foreign_keys = ON;")
+        connection = psycopg.connect(database_url)
+    except psycopg.OperationalError as error:
+        raise SystemExit(
+            "Could not connect to PostgreSQL.\n"
+            f"  {scrub(error, database_url)}"
+        )
 
-        advisors = load_advisors(cursor)
-        if not advisors:
-            raise SystemExit(
-                "The `advisors` table is empty.\n"
-                "Run 'python CRM/scripts/seed_advisors.py' first."
+    try:
+        with connection.cursor() as cursor:
+            try:
+                advisors = load_advisors(cursor)
+            except psycopg.errors.UndefinedTable:
+                connection.rollback()
+                raise SystemExit(
+                    "The `advisors` table does not exist.\n"
+                    "Run 'python CRM/scripts/init_db.py' first."
+                )
+
+            if not advisors:
+                raise SystemExit(
+                    "The `advisors` table is empty.\n"
+                    "Run 'python CRM/scripts/seed_advisors.py' first."
+                )
+
+            clients = generate_clients(advisors, rng)
+            wanted_ids = [client[0] for client in clients]
+
+            # Remove clients left over from an earlier, different dataset, so
+            # the table ends up with exactly 5,000 rows and never 10,000.
+            #
+            # SQLite needed a temporary table here, because a 5,000-placeholder
+            # "IN (?,?,?,...)" clause exceeds its variable limit. PostgreSQL
+            # takes the whole list as ONE array parameter, so the staging table
+            # is gone and the delete is a single statement.
+            cursor.execute(
+                "DELETE FROM clients WHERE NOT (client_id = ANY(%s))",
+                (wanted_ids,),
             )
+            removed = cursor.rowcount
 
-        clients = generate_clients(advisors, rng)
+            existing_ids = {row[0] for row in cursor.execute("SELECT client_id FROM clients")}
 
-        # Remove clients left over from an earlier, different dataset, so the
-        # table ends up with exactly 5,000 rows and never 10,000.
-        # A temp table avoids a 5,000-placeholder IN (...) clause.
-        cursor.execute("CREATE TEMP TABLE wanted_ids (client_id TEXT PRIMARY KEY)")
-        cursor.executemany(
-            "INSERT INTO wanted_ids (client_id) VALUES (?)",
-            [(client[0],) for client in clients],
-        )
-        cursor.execute(
-            "DELETE FROM clients WHERE client_id NOT IN (SELECT client_id FROM wanted_ids)"
-        )
-        removed = cursor.rowcount
+            # executemany() sends the whole batch in pipeline mode on
+            # PostgreSQL 14+, so the 5,000 rows do NOT cost 5,000 network
+            # round trips.
+            cursor.executemany(UPSERT_CLIENT, clients)
 
-        existing_ids = {row[0] for row in cursor.execute("SELECT client_id FROM clients")}
-        cursor.executemany(UPSERT_CLIENT, clients)
+            inserted = sum(1 for client in clients if client[0] not in existing_ids)
+            updated = len(clients) - inserted
 
-        inserted = sum(1 for client in clients if client[0] not in existing_ids)
-        updated = len(clients) - inserted
+            connection.commit()
 
-        connection.commit()
-
-        print(
-            f"Clients seeded: {inserted} inserted, {updated} refreshed, "
-            f"{removed} removed."
-        )
-        print()
-        report(cursor)
+            print(
+                f"Clients seeded: {inserted} inserted, {updated} refreshed, "
+                f"{removed} removed."
+            )
+            print()
+            report(cursor)
+    except psycopg.Error as error:
+        connection.rollback()
+        raise SystemExit(f"Seeding failed: {scrub(error, database_url)}")
     finally:
+        # "finally": the connection is closed even if an error occurs.
         connection.close()
 
 

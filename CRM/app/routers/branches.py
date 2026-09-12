@@ -26,16 +26,16 @@ def build_where_clause(filters):
     Returns the SQL fragment and the list of values to bind to it. Filters
     left empty are skipped, so the clause grows with the request:
 
-        no filter          -> ""                          []
-        country=France     -> " WHERE country = ?"        ["France"]
+        no filter          -> ""                           []
+        country=France     -> " WHERE country = %s"        ["France"]
         country=France
         &branch_status=Active
-                           -> " WHERE country = ?
-                                 AND branch_status = ?"   ["France", "Active"]
+                           -> " WHERE country = %s
+                                 AND branch_status = %s"   ["France", "Active"]
 
     The COLUMN NAME comes from FILTER_COLUMNS, which we control. The VALUE
-    never does - it is replaced by a "?" placeholder and passed to SQLite
-    separately.
+    never does - it is replaced by a "%s" placeholder and passed to the
+    server separately.
     """
     conditions = []
     values = []
@@ -44,7 +44,7 @@ def build_where_clause(filters):
         if value is None:
             continue
         column, operator = FILTER_COLUMNS[parameter_name]
-        conditions.append(f"{column} {operator} ?")
+        conditions.append(f"{column} {operator} %s")
         values.append(value)
 
     if not conditions:
@@ -123,7 +123,7 @@ def get_branch(
         # The id is a bound parameter, never glued into the SQL string.
         # fetchone() returns a single row, or None if nothing matched.
         row = connection.execute(
-            "SELECT * FROM branches WHERE branch_id = ?",
+            "SELECT * FROM branches WHERE branch_id = %s",
             (branch_id,),
         ).fetchone()
 

@@ -19,7 +19,10 @@ Any advisor left over from a previous run (for instance the older 25-advisor
 dataset) is removed, so the table always ends up with exactly 100 rows.
 
 Requires `branches` to be seeded first: every advisor references an existing
-branch_id, and SQLite enforces that link (PRAGMA foreign_keys = ON).
+branch_id, and PostgreSQL enforces that foreign key.
+
+Connection: the DATABASE_URL variable is read from the `.env` file at the
+repository root. That value is never printed.
 
 Prerequisites:
     python CRM/scripts/init_db.py
@@ -30,13 +33,19 @@ Usage:
 """
 
 import random
-import sqlite3
+import sys
 import unicodedata
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-CRM_DIR = Path(__file__).parent.parent
-DB_PATH = CRM_DIR / "data" / "orialis_crm.db"
+import psycopg
+
+# Shared PostgreSQL configuration: .env loading, DATABASE_URL retrieval and
+# validation, credential scrubbing. It lives at CRM/config.py, used by both
+# the API and these scripts. The repository root goes on the import path so
+# that `CRM.config` resolves the same way it does for the API.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+from CRM.config import get_database_url, scrub  # noqa: E402
 
 EMAIL_DOMAIN = "orialis.com"
 
@@ -309,16 +318,19 @@ def generate_advisors():
             spoken_languages = format_languages(primary, others)
 
             # --- updated_at: a plausible recent CRM edit -------------------
+            # Kept as a real datetime, not a formatted string: the column is
+            # TIMESTAMPTZ and psycopg adapts the object directly. The session
+            # runs in UTC, so a naive value is read as UTC.
             updated_day = random_date(rng, 2026, 2026)
             updated_at = datetime(
                 updated_day.year, updated_day.month, updated_day.day,
                 rng.randint(8, 18), rng.randint(0, 59), rng.randint(0, 59),
-            ).strftime("%Y-%m-%d %H:%M:%S")
+            )
 
             advisors.append((
                 advisor_id, first_name, last_name, email, phone, branch_id,
                 job_title, specialization, spoken_languages,
-                hire_date.isoformat(), DEFAULT_STATUS, updated_at,
+                hire_date, DEFAULT_STATUS, updated_at,
             ))
 
     return advisors
@@ -334,7 +346,7 @@ INSERT INTO advisors (
     job_title, specialization, spoken_languages, hire_date,
     advisor_status, updated_at
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
 ON CONFLICT (advisor_id) DO UPDATE SET
     first_name       = excluded.first_name,
     last_name        = excluded.last_name,
@@ -353,71 +365,96 @@ ON CONFLICT (advisor_id) DO UPDATE SET
 def seed_advisors():
     """Insert or refresh the 100 Orialis advisors."""
 
-    if not DB_PATH.exists():
-        raise SystemExit(
-            f"Database not found: {DB_PATH}\n"
-            f"Run 'python CRM/scripts/init_db.py' first."
-        )
-
     advisors = generate_advisors()
+    database_url = get_database_url()
 
-    connection = sqlite3.connect(DB_PATH)
+    # No PRAGMA here: PostgreSQL always enforces foreign keys. An advisor
+    # pointing at a branch that does not exist is rejected by the server,
+    # with no per-connection setting to remember.
     try:
-        cursor = connection.cursor()
-
-        # Without this, SQLite silently accepts an advisor pointing at a
-        # branch that does not exist. With it, such a row is rejected.
-        cursor.execute("PRAGMA foreign_keys = ON;")
-
-        known_branches = {row[0] for row in cursor.execute("SELECT branch_id FROM branches")}
-        if not known_branches:
-            raise SystemExit(
-                "The `branches` table is empty.\n"
-                "Run 'python CRM/scripts/seed_branches.py' first."
-            )
-
-        missing = sorted({advisor[5] for advisor in advisors} - known_branches)
-        if missing:
-            raise SystemExit(f"Unknown branch_id referenced by advisors: {missing}")
-
-        existing_ids = {row[0] for row in cursor.execute("SELECT advisor_id FROM advisors")}
-        wanted_ids = [advisor[0] for advisor in advisors]
-
-        # Drop advisors left over from an earlier, different dataset, so the
-        # table ends up with exactly the generated headcount and not a mix.
-        placeholders = ",".join("?" for _ in wanted_ids)
-        cursor.execute(
-            f"DELETE FROM advisors WHERE advisor_id NOT IN ({placeholders})",
-            wanted_ids,
+        connection = psycopg.connect(database_url)
+    except psycopg.OperationalError as error:
+        raise SystemExit(
+            "Could not connect to PostgreSQL.\n"
+            f"  {scrub(error, database_url)}"
         )
-        removed = cursor.rowcount
 
-        inserted = updated = 0
-        for advisor in advisors:
-            cursor.execute(UPSERT_ADVISOR, advisor)
-            if advisor[0] in existing_ids:
-                updated += 1
-            else:
-                inserted += 1
+    try:
+        with connection.cursor() as cursor:
+            # Advisors depend on branches, so check the parent table first and
+            # fail with a clear message rather than a raw constraint error.
+            try:
+                cursor.execute("SELECT branch_id FROM branches")
+            except psycopg.errors.UndefinedTable:
+                connection.rollback()
+                raise SystemExit(
+                    "The `branches` table does not exist.\n"
+                    "Run 'python CRM/scripts/init_db.py' first."
+                )
+            known_branches = {row[0] for row in cursor.fetchall()}
 
-        connection.commit()
+            if not known_branches:
+                raise SystemExit(
+                    "The `branches` table is empty.\n"
+                    "Run 'python CRM/scripts/seed_branches.py' first."
+                )
 
-        # Read the data back, to report on what is actually stored.
-        total = list(cursor.execute("SELECT COUNT(*) FROM advisors"))[0][0]
-        per_branch = list(cursor.execute("""
-            SELECT b.branch_id, b.branch_name, b.country, COUNT(a.advisor_id)
-            FROM branches b
-            LEFT JOIN advisors a ON a.branch_id = b.branch_id
-            GROUP BY b.branch_id, b.branch_name, b.country
-            ORDER BY b.branch_id
-        """))
-        languages = list(cursor.execute("""
-            SELECT spoken_languages, COUNT(*)
-            FROM advisors
-            GROUP BY spoken_languages
-            ORDER BY COUNT(*) DESC, spoken_languages
-        """))
+            missing = sorted({advisor[5] for advisor in advisors} - known_branches)
+            if missing:
+                raise SystemExit(f"Unknown branch_id referenced by advisors: {missing}")
+
+            cursor.execute("SELECT advisor_id FROM advisors")
+            existing_ids = {row[0] for row in cursor.fetchall()}
+            wanted_ids = [advisor[0] for advisor in advisors]
+
+            # Drop advisors left over from an earlier, different dataset, so
+            # the table ends up with exactly the generated headcount and not
+            # a mix of the two.
+            #
+            # `= ANY(%s)` passes the whole list as ONE parameter, which is the
+            # PostgreSQL way. SQLite needed a generated "?,?,?,..." string -
+            # 100 placeholders here, and 5,000 in the clients seed.
+            cursor.execute(
+                "DELETE FROM advisors WHERE NOT (advisor_id = ANY(%s))",
+                (wanted_ids,),
+            )
+            removed = cursor.rowcount
+
+            inserted = updated = 0
+            for advisor in advisors:
+                cursor.execute(UPSERT_ADVISOR, advisor)
+                if advisor[0] in existing_ids:
+                    updated += 1
+                else:
+                    inserted += 1
+
+            connection.commit()
+
+            # Read the data back, to report on what is actually stored.
+            cursor.execute("SELECT COUNT(*) FROM advisors")
+            total = cursor.fetchone()[0]
+
+            cursor.execute("""
+                SELECT b.branch_id, b.branch_name, b.country, COUNT(a.advisor_id)
+                FROM branches b
+                LEFT JOIN advisors a ON a.branch_id = b.branch_id
+                GROUP BY b.branch_id, b.branch_name, b.country
+                ORDER BY b.branch_id
+            """)
+            per_branch = cursor.fetchall()
+
+            cursor.execute("""
+                SELECT spoken_languages, COUNT(*)
+                FROM advisors
+                GROUP BY spoken_languages
+                ORDER BY COUNT(*) DESC, spoken_languages
+            """)
+            languages = cursor.fetchall()
+    except psycopg.Error as error:
+        connection.rollback()
+        raise SystemExit(f"Seeding failed: {scrub(error, database_url)}")
     finally:
+        # "finally": the connection is closed even if an error occurs.
         connection.close()
 
     print(

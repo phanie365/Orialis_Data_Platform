@@ -14,25 +14,21 @@ router = APIRouter(prefix="/api/v1", tags=["interactions"])
 
 
 # Maps the public query-parameter name to the SQL condition it produces.
-# Each template holds exactly one "?", which is where the caller's value is
+# Each template holds exactly one "%s", which is where the caller's value is
 # bound - the value itself is never written into the string.
 #
 # Note the two different time columns. They answer two different questions:
 #   interaction_date -> WHEN THE MEETING HAPPENED   (business event)
 #   created_at       -> WHEN THE RECORD WAS WRITTEN (CRM bookkeeping)
 FILTER_CONDITIONS = {
-    "client_id": "client_id = ?",
-    "advisor_id": "advisor_id = ?",
-    "interaction_type": "interaction_type = ?",
-    "channel": "channel = ?",
-    "date_from": "interaction_date >= ?",
-    "date_to": "interaction_date <= ?",
-    "created_since": "created_at >= ?",
+    "client_id": "client_id = %s",
+    "advisor_id": "advisor_id = %s",
+    "interaction_type": "interaction_type = %s",
+    "channel": "channel = %s",
+    "date_from": "interaction_date >= %s",
+    "date_to": "interaction_date <= %s",
+    "created_since": "created_at >= %s",
 }
-
-# How timestamps are stored in the CRM database: "2026-09-01 14:30:00".
-# Note the SPACE between date and time, where an ISO-8601 input uses a "T".
-TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 # Most recent interactions first. `interaction_id` breaks ties: 49 timestamps
 # in this table are shared by several interactions, and a sort that leaves
@@ -47,15 +43,15 @@ def build_where_clause(filters):
     Returns the SQL fragment and the list of values to bind to it. Filters
     left empty are skipped, so the clause grows with the request:
 
-        no filter               -> ""                          []
-        channel=Phone           -> " WHERE channel = ?"         ["Phone"]
+        no filter               -> ""                           []
+        channel=Phone           -> " WHERE channel = %s"         ["Phone"]
         advisor_id=ADV001
-        &date_from=2026-01-01   -> " WHERE advisor_id = ?
-                                      AND interaction_date >= ?"
-                                        ["ADV001", "2026-01-01 00:00:00"]
+        &date_from=2026-01-01   -> " WHERE advisor_id = %s
+                                      AND interaction_date >= %s"
+                                    ["ADV001", datetime(2026, 1, 1)]
 
     The SQL comes from FILTER_CONDITIONS, which we control. The VALUE never
-    does - it is bound to the "?" placeholder and passed to SQLite
+    does - it is bound to the "%s" placeholder and passed to the server
     separately.
     """
     conditions = []
@@ -71,15 +67,6 @@ def build_where_clause(filters):
         return "", []
 
     return " WHERE " + " AND ".join(conditions), values
-
-
-def to_database_timestamp(moment):
-    """Render a datetime the way the database stores it, or None.
-
-    Sending the ISO form ("2026-01-01T00:00:00") would compare a "T" against
-    a space and silently drop valid rows.
-    """
-    return moment.strftime(TIMESTAMP_FORMAT) if moment else None
 
 
 @router.get(
@@ -163,9 +150,19 @@ def list_interactions(
         "advisor_id": advisor_id,
         "interaction_type": interaction_type,
         "channel": channel,
-        "date_from": to_database_timestamp(date_from),
-        "date_to": to_database_timestamp(date_to),
-        "created_since": to_database_timestamp(created_since),
+        # Both time columns are real TIMESTAMPTZ, and FastAPI already parsed
+        # these parameters into datetimes, so the objects go straight to the
+        # server. The text era needed a strftime() here: comparing the ISO
+        # form ("...T00:00:00") against the stored form ("... 00:00:00")
+        # compared a "T" with a space and silently dropped valid rows.
+        #
+        # A value given without an offset is naive, and PostgreSQL reads it
+        # in the session time zone - UTC here, which is also how the stored
+        # instants were written. A value given WITH an offset now works too,
+        # which the string comparison could never have handled.
+        "date_from": date_from,
+        "date_to": date_to,
+        "created_since": created_since,
     })
 
     # Page 1 starts at row 0, page 2 at row `page_size`, and so on.
@@ -173,17 +170,22 @@ def list_interactions(
 
     with get_connection() as connection:
         # How many interactions match the filters, ignoring pagination.
-        # COUNT(*) is computed by SQLite, so no row is transferred for it.
+        # COUNT(*) is computed by the server, so no row is transferred.
+        #
+        # The aggregate gets an explicit alias: rows come back as
+        # dictionaries (dict_row), so there is no row[0] to read, and
+        # relying on the driver's default name for an unnamed expression
+        # would be guesswork.
         total_records = connection.execute(
-            f"SELECT COUNT(*) FROM interactions{where_sql}",
+            f"SELECT COUNT(*) AS total FROM interactions{where_sql}",
             where_values,
-        ).fetchone()[0]
+        ).fetchone()["total"]
 
         # Only the requested page leaves the database. On a 30,000-row table
         # this is the difference between a few kilobytes and several
         # megabytes per request.
         rows = connection.execute(
-            f"SELECT * FROM interactions{where_sql} {ORDER_BY} LIMIT ? OFFSET ?",
+            f"SELECT * FROM interactions{where_sql} {ORDER_BY} LIMIT %s OFFSET %s",
             where_values + [page_size, offset],
         ).fetchall()
 
@@ -224,7 +226,7 @@ def get_interaction(
         # The id is a bound parameter, never glued into the SQL string.
         # fetchone() returns a single row, or None if nothing matched.
         row = connection.execute(
-            "SELECT * FROM interactions WHERE interaction_id = ?",
+            "SELECT * FROM interactions WHERE interaction_id = %s",
             (interaction_id,),
         ).fetchone()
 
