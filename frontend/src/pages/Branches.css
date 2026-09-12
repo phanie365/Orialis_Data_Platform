@@ -1,0 +1,131 @@
+/* The branch network, as cards. Editorial rather than tabular: a forest
+   header, then the facts separated by hairlines. */
+
+.branches {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: var(--space-5);
+}
+
+.branch {
+  display: flex;
+  flex-direction: column;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+/* -- Header ----------------------------------------------------------------
+   The one deep-green surface outside the navigation rail. Flat fill, cream
+   type - the moodboard's signage, not a gradient banner. */
+.branch__head {
+  background: var(--forest);
+  padding: var(--space-5) var(--space-5) var(--space-4);
+}
+
+.branch__id {
+  display: block;
+  font-size: 9.5px;
+  font-weight: 500;
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  color: var(--sage);
+}
+
+.branch__name {
+  margin: var(--space-2) 0 0;
+  font-family: var(--font-serif);
+  font-size: 22px;
+  font-weight: 400;
+  letter-spacing: 0.015em;
+  color: var(--text-on-dark);
+}
+
+.branch__city {
+  display: block;
+  margin-top: 3px;
+  font-size: 11.5px;
+  color: var(--text-on-dark-muted);
+}
+
+/* -- Facts ---------------------------------------------------------------- */
+.branch__facts {
+  margin: 0;
+  padding: var(--space-2) var(--space-5);
+  flex: 1;
+}
+
+.branch__fact {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.branch__fact:last-child {
+  border-bottom: none;
+}
+
+.branch__fact dd {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-primary);
+  text-align: right;
+}
+
+/* The IANA zone, set slightly smaller: it is a technical identifier, not a
+   place name, and should not compete with the region above it. */
+.branch__tz {
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  color: var(--text-secondary);
+}
+
+/* -- Footer ---------------------------------------------------------------- */
+.branch__foot {
+  padding: var(--space-4) var(--space-5);
+  border-top: 1px solid var(--border);
+  background: var(--cream);
+}
+
+.branch__link {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+}
+
+.branch__link:hover {
+  border-bottom-color: var(--champagne);
+}
+
+.branch__count {
+  font-family: var(--font-serif);
+  font-size: 20px;
+  color: var(--forest);
+  font-variant-numeric: lining-nums tabular-nums;
+  font-feature-settings: 'lnum' 1, 'tnum' 1;
+}
+
+.branch__countUnit {
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+/* -- Loading --------------------------------------------------------------- */
+.branch--loading {
+  padding: var(--space-5);
+  gap: var(--space-3);
+  min-height: 232px;
+}
+
+.branch__skeletonHead { height: 22px; width: 62%; }
+.branch__skeletonLine { height: 11px; width: 84%; }
+.branch__skeletonCount { height: 18px; width: 96px; display: inline-block; }

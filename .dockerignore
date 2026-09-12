@@ -44,6 +44,19 @@ CRM/data/
 **/*.sqlite
 **/*.sqlite3
 
+# --- The frontend ----------------------------------------------------------
+# The Dockerfile builds the API only, and copies just CRM/. Without this
+# entry the whole frontend still reaches the daemon as build context: adding
+# it took the context from 76 kB to 42.7 MB, almost all of it the 2,300 files
+# under node_modules. Excluded wholesale - when the frontend is containerised
+# it will get a Dockerfile and a context of its own.
+frontend/
+
+# --- Node --------------------------------------------------------------------
+**/node_modules/
+**/.npm/
+**/npm-debug.log*
+
 # --- Python environments and caches ----------------------------------------
 **/.venv/
 **/venv/

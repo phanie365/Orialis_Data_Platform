@@ -1,0 +1,142 @@
+/* The filter row. A band of the page ground, framed by hairlines, sitting
+   directly above the table rather than inside a card of its own. */
+
+.filters {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-5);
+  flex-wrap: wrap;
+  padding: var(--space-5) var(--space-6);
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-bottom: none;
+  border-radius: var(--radius) var(--radius) 0 0;
+}
+
+.filters__controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4) var(--space-5);
+}
+
+.filters__field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.filters__label {
+  color: var(--text-muted);
+}
+
+/* Native controls, restyled to the system. The default browser chrome -
+   rounded corners, blue focus ring, system font - is exactly the generic
+   look the brand avoids, so every property is set explicitly. */
+.filters__input {
+  appearance: none;
+  -webkit-appearance: none;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  color: var(--text-primary);
+  background: var(--cream);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: 7px 10px;
+  min-width: 150px;
+  height: 33px;
+  line-height: 1.2;
+}
+
+/* The dropdown arrow, drawn rather than inherited: a thin champagne
+   chevron instead of the platform's filled triangle. */
+select.filters__input {
+  padding-right: 26px;
+  background-image: linear-gradient(45deg, transparent 50%, var(--champagne) 50%),
+                    linear-gradient(135deg, var(--champagne) 50%, transparent 50%);
+  background-position: calc(100% - 14px) 14px, calc(100% - 9px) 14px;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  cursor: pointer;
+}
+
+.filters__input:hover:not(:disabled) {
+  border-color: var(--champagne);
+}
+
+.filters__input:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.filters__input::placeholder {
+  color: var(--text-muted);
+}
+
+.filters__summary {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-4);
+  margin-left: auto;
+}
+
+.filters__count {
+  font-family: var(--font-serif);
+  font-size: 19px;
+  color: var(--forest);
+  font-variant-numeric: lining-nums tabular-nums;
+  font-feature-settings: 'lnum' 1, 'tnum' 1;
+}
+
+/* The zero case, set in the sans at label size: it is a statement, not a
+   figure. */
+.filters__none {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.filters__countUnit {
+  font-family: var(--font-sans);
+  font-size: 10px;
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-left: 7px;
+}
+
+/* A text button, underlined on the champagne accent. Not a filled pill. */
+.filters__reset {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--champagne);
+  padding: 0 0 2px;
+  cursor: pointer;
+}
+
+.filters__reset:hover {
+  color: var(--forest);
+}
+
+@media (max-width: 760px) {
+  .filters {
+    padding: var(--space-4) var(--space-5);
+  }
+
+  .filters__field {
+    flex: 1 1 160px;
+  }
+
+  .filters__input {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .filters__summary {
+    margin-left: 0;
+  }
+}

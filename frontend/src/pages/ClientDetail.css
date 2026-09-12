@@ -1,0 +1,204 @@
+/* The client record. Three columns of facts, then the history below. */
+
+.detail__crumbSep {
+  margin: 0 7px;
+  color: var(--stone);
+}
+
+/* The status sits in the header's right slot. Label above, value below,
+   both right-aligned - the inline version left the dot colliding with the
+   word "STATUS". */
+.detail__status {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-1);
+}
+
+.detail__status .status {
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+/* -- Classification band ----------------------------------------------------
+   Segment, risk and seniority, set as three editorial facts on the page
+   ground rather than inside cards - the same treatment as the dashboard's
+   brand line. */
+.detail__summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-7);
+  padding-bottom: var(--space-6);
+  margin-bottom: var(--space-6);
+  border-bottom: 1px solid var(--border);
+}
+
+.summaryItem {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.summaryItem__value {
+  font-family: var(--font-serif);
+  font-size: 24px;
+  font-weight: 400;
+  color: var(--forest);
+  line-height: 1.15;
+  font-variant-numeric: lining-nums tabular-nums;
+}
+
+/* -- Panels ----------------------------------------------------------------- */
+.detail__grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-5);
+  align-items: start;
+}
+
+.detail__section {
+  margin-bottom: var(--space-5);
+}
+
+.detail__skeleton {
+  height: 13px;
+  width: 78%;
+  margin-bottom: var(--space-4);
+}
+
+/* -- Fact list --------------------------------------------------------------
+   Label left, value right, separated by a hairline. The pattern the moodboard
+   uses for its values panel. */
+.facts {
+  margin: 0;
+}
+
+.fact {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.fact:first-child { padding-top: 0; }
+.fact:last-child { border-bottom: none; padding-bottom: 0; }
+
+.fact__value {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-primary);
+  text-align: right;
+  /* A long email must wrap rather than force the panel wider. */
+  word-break: break-word;
+}
+
+.fact__link {
+  color: var(--forest);
+  text-decoration: none;
+  border-bottom: 1px solid var(--stone);
+}
+
+.fact__link:hover {
+  border-bottom-color: var(--champagne);
+}
+
+/* -- Advisor ---------------------------------------------------------------- */
+.advisorCard {
+  padding-bottom: var(--space-4);
+  margin-bottom: var(--space-2);
+  border-bottom: 1px solid var(--border-strong);
+}
+
+.advisorCard__name {
+  font-family: var(--font-serif);
+  font-size: 20px;
+  color: var(--forest);
+}
+
+.advisorCard__title {
+  margin-top: 2px;
+  font-size: 11px;
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+/* -- History ---------------------------------------------------------------- */
+.history {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.history__row {
+  display: grid;
+  grid-template-columns: 160px 1fr 210px;
+  gap: var(--space-5);
+  align-items: baseline;
+  padding: var(--space-4) 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.history__row:first-child { padding-top: 0; }
+.history__row:last-child { border-bottom: none; padding-bottom: 0; }
+
+.history__when {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.history__subject {
+  font-size: 13.5px;
+  color: var(--text-primary);
+}
+
+.history__meta {
+  margin-top: 2px;
+  font-size: 10px;
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.history__outcome {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+.history__more {
+  margin-top: var(--space-5);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.history__more a {
+  color: var(--forest);
+  text-decoration: none;
+  border-bottom: 1px solid var(--champagne);
+}
+
+/* -- Responsive -------------------------------------------------------------- */
+@media (max-width: 1180px) {
+  .detail__grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 820px) {
+  .detail__grid {
+    grid-template-columns: 1fr;
+  }
+
+  .detail__summary {
+    gap: var(--space-5);
+  }
+
+  .history__row {
+    grid-template-columns: 1fr;
+    gap: var(--space-2);
+  }
+}

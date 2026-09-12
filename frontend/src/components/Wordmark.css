@@ -1,0 +1,46 @@
+/* The wordmark. Restrained: no box, no background, no effect. */
+
+.wordmark {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+
+.wordmark__mark {
+  width: 22px;
+  height: 27px;
+  flex: none;
+}
+
+.wordmark__name {
+  font-family: var(--font-serif);
+  font-size: 21px;
+  font-weight: 500;
+  /* The wide tracking is the wordmark. Set tighter, it stops reading as
+     Orialis and starts reading as any serif logotype. */
+  letter-spacing: var(--tracking-wordmark);
+  line-height: 1.05;
+  /* Tracking adds space AFTER the last letter too, which visually shifts
+     the word left of its container. Pulled back by the same amount. */
+  margin-right: calc(-1 * var(--tracking-wordmark));
+}
+
+.wordmark__descriptor {
+  margin-top: 3px;
+  font-family: var(--font-sans);
+  font-size: 7.5px;
+  font-weight: 500;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  margin-right: -0.28em;
+}
+
+/* On the dark navigation rail. */
+.wordmark--light .wordmark__mark { color: var(--sage); }
+.wordmark--light .wordmark__name { color: var(--text-on-dark); }
+.wordmark--light .wordmark__descriptor { color: var(--text-on-dark-muted); }
+
+/* On a cream or warm-white ground. */
+.wordmark--dark .wordmark__mark { color: var(--forest); }
+.wordmark--dark .wordmark__name { color: var(--forest); }
+.wordmark--dark .wordmark__descriptor { color: var(--text-muted); }

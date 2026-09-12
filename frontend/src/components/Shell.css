@@ -1,0 +1,238 @@
+/* Shell: rail, header, content well. */
+
+.shell {
+  display: flex;
+  min-height: 100%;
+}
+
+/* -- Navigation rail --------------------------------------------------------
+   A solid forest panel, flat. The moodboard's signage and folder are single
+   deep-green surfaces; a gradient or a shadow here would break that. */
+.rail {
+  width: var(--rail-width);
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  background: var(--forest-dark);
+  padding: var(--space-7) 0 var(--space-5);
+  position: sticky;
+  top: 0;
+  height: 100vh;
+}
+
+.rail__brand {
+  padding: 0 var(--space-6) var(--space-7);
+}
+
+.rail__section {
+  padding: 0 var(--space-6) var(--space-3);
+  color: var(--text-on-dark-muted);
+  opacity: 0.72;
+}
+
+.rail__nav {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  flex: 1;
+}
+
+.rail__brandLink {
+  display: block;
+  text-decoration: none;
+}
+
+.rail__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: 9px var(--space-6);
+  font-size: 13px;
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  color: var(--text-on-dark-muted);
+  text-decoration: none;
+  /* A transparent left edge on every item, so the active marker appears
+     rather than shifting the text when it does. */
+  border-left: 2px solid transparent;
+}
+
+.rail__item:hover {
+  color: var(--text-on-dark);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.rail__item--current {
+  color: var(--text-on-dark);
+  font-weight: 500;
+  background: var(--forest-soft);
+  /* Champagne, the foil accent of the moodboard, marks the current section.
+     A 2px rule is the whole indicator - no pill, no rounded highlight. */
+  border-left-color: var(--champagne);
+}
+
+.rail__footer {
+  padding: var(--space-5) var(--space-6) 0;
+  border-top: 1px solid var(--border-on-dark);
+  margin-top: var(--space-5);
+}
+
+/* CONSEILLER | PLANIFIER | TRANSMETTRE, stacked for the rail's width. */
+.rail__motto {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 8.5px;
+  font-weight: 500;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--text-on-dark-muted);
+  opacity: 0.62;
+}
+
+/* -- Main column ----------------------------------------------------------- */
+.main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.topbar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-6);
+  padding: var(--space-7) var(--space-8) var(--space-5);
+  border-bottom: 1px solid var(--border);
+  max-width: var(--content-max);
+  width: 100%;
+}
+
+.topbar__heading {
+  min-width: 0;
+}
+
+.topbar__eyebrow {
+  margin-bottom: var(--space-2);
+}
+
+/* The breadcrumb replaces the eyebrow on a detail page: same position, same
+   size, but it carries a link back to the list. */
+.topbar__crumb {
+  margin-bottom: var(--space-2);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.topbar__crumb a {
+  color: var(--text-secondary);
+  text-decoration: none;
+  border-bottom: 1px solid var(--stone);
+}
+
+.topbar__crumb a:hover {
+  color: var(--forest);
+  border-bottom-color: var(--champagne);
+}
+
+.topbar__aside {
+  flex: none;
+  text-align: right;
+}
+
+.topbar__title {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 34px;
+  font-weight: 400;
+  line-height: 1.1;
+  letter-spacing: 0.005em;
+  color: var(--forest);
+}
+
+.topbar__subtitle {
+  margin: var(--space-2) 0 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+  max-width: 62ch;
+}
+
+.topbar__date {
+  text-align: right;
+  flex: none;
+}
+
+.topbar__dateValue {
+  margin-top: var(--space-1);
+  font-family: var(--font-serif);
+  font-size: 15px;
+  font-style: italic;
+  color: var(--text-secondary);
+}
+
+.content {
+  padding: var(--space-7) var(--space-8) var(--space-8);
+  max-width: var(--content-max);
+  width: 100%;
+}
+
+/* -- Narrow screens ---------------------------------------------------------
+   The rail becomes a horizontal strip rather than disappearing: this is an
+   internal tool, and losing the brand entirely on a laptop would be worse
+   than a slightly denser header. */
+@media (max-width: 900px) {
+  .shell {
+    flex-direction: column;
+  }
+
+  .rail {
+    width: 100%;
+    height: auto;
+    position: static;
+    padding: var(--space-5) 0;
+  }
+
+  .rail__brand {
+    padding: 0 var(--space-5) var(--space-4);
+  }
+
+  .rail__section,
+  .rail__footer {
+    display: none;
+  }
+
+  .rail__nav {
+    display: flex;
+    overflow-x: auto;
+    padding: 0 var(--space-4);
+  }
+
+  .rail__item {
+    border-left: none;
+    border-bottom: 2px solid transparent;
+    white-space: nowrap;
+  }
+
+  .rail__item--current {
+    border-left: none;
+    border-bottom-color: var(--champagne);
+  }
+
+  .topbar,
+  .content {
+    padding-left: var(--space-5);
+    padding-right: var(--space-5);
+  }
+
+  .topbar {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-4);
+  }
+
+  .topbar__date {
+    text-align: left;
+  }
+}

@@ -151,11 +151,16 @@ CRM/
 ├── app/            # FastAPI application
 │   ├── database.py #   connection layer
 │   ├── main.py     #   application assembly
-│   └── routers/    #   one module per resource
+│   ├── security.py #   X-API-Key dependency
+│   └── routers/    #   one module per resource, plus stats.py for aggregates
 ├── scripts/        # Schema, seeds, simulator, incremental test
 ├── data/           # Historical SQLite artefact only - not used, not versioned
-└── tests/          # Automated tests (not written yet)
+└── tests/          # Verification against PostgreSQL
 ```
+
+The React frontend that consumes this API lives in `frontend/` at the
+repository root, outside `CRM/`. It has its own README. It never reaches
+PostgreSQL: every figure it displays comes from the endpoints above.
 
 `config.py` sits beside `app/` and `scripts/` on purpose: the configuration
 belongs to neither, and both consume it. Putting it inside one would make the
@@ -330,6 +335,76 @@ reference table, so it is returned whole.
 An unknown id answers **404**; an invalid parameter answers **422**, produced
 by FastAPI's own validation. `total_records` always reflects the filters in
 use, never the size of the table.
+
+### Aggregate endpoints
+
+Two further routes live in `CRM/app/routers/stats.py`, deliberately apart from
+the four resource routers. Those expose CRM **records**; these expose **facts
+about** them, and return no operational row at all.
+
+| Endpoint | Returns |
+|---|---|
+| `GET /api/v1/stats/overview` | Headline counts, the three client breakdowns, and the advisors holding the most clients |
+| `GET /api/v1/stats/filters` | The distinct values of every filterable dimension |
+
+Both are protected by `X-API-Key` like every other `/api/v1` route, and both
+are computed by PostgreSQL with `COUNT` and `GROUP BY` — no table is pulled
+into Python to be aggregated in a loop.
+
+**`/stats/overview`** exists because the alternative was untenable. Ranking
+advisors by client count from the paginated API meant one request per advisor —
+100 round trips for a single panel — or downloading all 5,000 clients (about
+2.1 MB) to group them in the browser. The endpoint answers the same question in
+**one call of roughly 1 kB**:
+
+```json
+{
+  "totals": { "total_clients": 5000, "active_clients": 4396,
+              "total_advisors": 100, "total_interactions": 30130 },
+  "clients_by_segment":      [ { "segment": "Standard", "client_count": 3250 } ],
+  "clients_by_country":      [ { "country": "France", "client_count": 2500 } ],
+  "clients_by_risk_profile": [ { "risk_profile": "Balanced", "client_count": 2501 } ],
+  "top_advisors": [ { "advisor_id": "ADV012", "first_name": "Sophie",
+                      "last_name": "Vidal", "client_count": 170 } ]
+}
+```
+
+`top_advisors_limit` (1–20, default 5) sets how many advisors come back. The
+breakdowns carry their own labels, so no consumer needs a private copy of the
+CRM's reference values.
+
+Recent interactions are deliberately **not** part of this payload: they are
+records, and they are fetched from `/api/v1/interactions` like any other list.
+An endpoint that answered with both counts and rows would force every caller
+wanting a total to pay for rows it did not ask for.
+
+**`/stats/filters`** returns the distinct value of each dimension the list
+endpoints filter on, so a consumer can offer pickers without holding its own
+copy of the reference data:
+
+```json
+{
+  "client_country": ["Belgium", "France", "Italy", "Switzerland"],
+  "client_segment": ["Patrimonial", "Private Banking", "Standard"],
+  "client_risk_profile": ["Balanced", "Conservative", "Growth"],
+  "client_status": ["Active", "Inactive", "Prospect"],
+  "advisor_specialization": ["Estate Planning", "..." ],
+  "advisor_status": ["Active"],
+  "advisor_job_title": ["Branch Manager", "..." ],
+  "advisor_spoken_language": ["EN", "FR", "IT"],
+  "interaction_type": ["Administrative Update", "..." ],
+  "interaction_channel": ["Client Portal", "Email", "In Person", "Phone", "Video Call"]
+}
+```
+
+Note `advisor_spoken_language`. The column stores a delimited string —
+`"FR,EN,IT"` — so it holds seven combinations for three actual languages. The
+endpoint splits and flattens it, because the `spoken_language` filter matches
+one language and offering `"FR,EN,IT"` as a choice would be offering something
+that is not a language.
+
+The whole payload is under a kilobyte. The heaviest scan behind it, `DISTINCT`
+over the 30,130 interactions, was measured at **10.6 ms**.
 
 ## Daily Activity Simulation
 

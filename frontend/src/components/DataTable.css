@@ -1,0 +1,136 @@
+/* The list table. Sits between the filter bar and the pager, so it carries
+   side borders only - the three elements read as one framed block. */
+
+.datatable {
+  background: var(--card);
+  border-left: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  /* A wide table scrolls inside itself rather than pushing the page
+     sideways. */
+  overflow-x: auto;
+}
+
+.datatable__table {
+  width: 100%;
+  border-collapse: collapse;
+  white-space: nowrap;
+}
+
+.datatable__table th {
+  text-align: left;
+  padding: var(--space-4) var(--space-4) var(--space-3);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border-strong);
+  font-weight: 500;
+  background: var(--card);
+  /* The header stays put while a long page scrolls under it. */
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.datatable__table th:first-child,
+.datatable__table td:first-child {
+  padding-left: var(--space-6);
+}
+
+.datatable__table th:last-child,
+.datatable__table td:last-child {
+  padding-right: var(--space-6);
+}
+
+.datatable__table td {
+  padding: var(--space-4);
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  vertical-align: middle;
+}
+
+.datatable__table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.datatable__right {
+  text-align: right;
+}
+
+.datatable__row--clickable {
+  cursor: pointer;
+}
+
+.datatable__row--clickable:hover td {
+  background: #f2ede2;
+}
+
+/* The focus ring belongs on the row, not on each cell. */
+.datatable__row--clickable:focus-visible {
+  outline: 2px solid var(--champagne);
+  outline-offset: -2px;
+}
+
+.datatable__skeleton {
+  height: 11px;
+  display: inline-block;
+}
+
+/* -- Cell primitives, shared by every list ------------------------------- */
+
+/* A name, the primary identity in a row. */
+.cell-name {
+  color: var(--text-primary);
+  font-size: 13.5px;
+}
+
+/* An identifier: quieter, letterspaced, tabular. */
+.cell-id {
+  font-size: 11.5px;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  font-variant-numeric: lining-nums tabular-nums;
+}
+
+/* A secondary line under a primary one. */
+.cell-sub {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.cell-muted {
+  color: var(--text-secondary);
+}
+
+/* A value drawn from a small closed set - segment, risk, channel. Set as a
+   letterspaced small capital rather than as a coloured chip: the moodboard
+   labels things with type, not with badges. */
+.cell-tag {
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+/* -- Status --------------------------------------------------------------
+   A muted dot and the word. Never a filled background. */
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+.status::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--status-neutral);
+  flex: none;
+}
+
+.status--active::before { background: var(--status-active); }
+.status--prospect::before { background: var(--status-pending); }
+.status--inactive::before { background: var(--status-neutral); }

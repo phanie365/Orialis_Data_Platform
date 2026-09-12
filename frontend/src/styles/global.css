@@ -1,0 +1,192 @@
+/**
+ * Global styles and shared primitives.
+ *
+ * Component-specific rules live next to their component. What is here is
+ * either a reset, or a pattern used by more than one panel.
+ */
+
+@import './tokens.css';
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--cream);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Tabular figures everywhere a number is compared to another number. Without
+   this, digits have different widths and columns of counts look ragged.
+   
+   `lining-nums` is not optional here. Cormorant Garamond ships old-style
+   figures by default - the ones that sit on varying baselines, where the 1
+   is drawn as a small serifed I. They are beautiful in running prose and
+   wrong on a KPI: "100" reads as "IOO" and "30,130" as "30,I30". Lining
+   figures restore a uniform cap height without giving up the serif. */
+.tnum {
+  font-variant-numeric: lining-nums tabular-nums;
+  font-feature-settings: 'lnum' 1, 'tnum' 1;
+}
+
+/* -- The letterspaced label ------------------------------------------------
+   Used for every section heading, column header and KPI caption. */
+.label {
+  font-family: var(--font-sans);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+/* -- Panel -----------------------------------------------------------------
+   The one container in the system: warm white, one hairline, barely rounded,
+   no shadow. Depth is expressed by the border alone. */
+.panel {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.panel__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-5) var(--space-6) var(--space-4);
+  border-bottom: 1px solid var(--border);
+}
+
+.panel__title {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 19px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  color: var(--text-primary);
+}
+
+.panel__note {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.panel__body {
+  padding: var(--space-5) var(--space-6) var(--space-6);
+}
+
+/* -- States ---------------------------------------------------------------- */
+
+.state {
+  padding: var(--space-7) var(--space-6);
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.state--error {
+  color: #8a5340;
+}
+
+/* A link inside an empty or error state. Without this the browser's default
+   blue underline appears - the one piece of generic chrome that undoes an
+   otherwise consistent page. */
+.state a {
+  color: var(--forest);
+  text-decoration: none;
+  border-bottom: 1px solid var(--champagne);
+}
+
+.state a:hover {
+  color: var(--forest-soft);
+}
+
+.state__detail {
+  margin-top: var(--space-2);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* A skeleton that borrows the brand neutrals rather than the usual grey
+   shimmer, and does not pulse: a quiet placeholder suits the product. */
+.skeleton {
+  display: block;
+  background: var(--series-track);
+  border-radius: var(--radius);
+  opacity: 0.55;
+}
+
+/* -- Focus ----------------------------------------------------------------
+   Keyboard focus must stay visible; champagne reads clearly on both the
+   cream ground and the forest rail. */
+:focus-visible {
+  outline: 2px solid var(--champagne);
+  outline-offset: 2px;
+}
+
+
+/* -- Shared inline primitives ----------------------------------------------
+   Used by more than one page, so they live here rather than in whichever
+   component happened to need them first. */
+
+/* A link inside a table cell. */
+.cellLink {
+  color: var(--forest);
+  text-decoration: none;
+  border-bottom: 1px solid var(--stone);
+  font-variant-numeric: lining-nums tabular-nums;
+}
+
+.cellLink:hover {
+  border-bottom-color: var(--champagne);
+}
+
+/* The languages an advisor speaks, as separate tokens rather than the raw
+   "FR,EN,IT" string the column stores. */
+.advisorLangs {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.advisorLangs__item {
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: 2px 6px;
+}
+
+/* The muted status dot. Defined globally because the interaction table, the
+   client history and the dashboard feed all use it. */
+.dot {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  margin-right: 8px;
+  vertical-align: middle;
+  flex: none;
+}
+
+.dot--active { background: var(--status-active); }
+.dot--neutral { background: var(--status-neutral); }
+.dot--pending { background: var(--status-pending); }

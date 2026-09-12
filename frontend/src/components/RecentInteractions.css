@@ -1,0 +1,96 @@
+/* The activity table. Hairlines only: no zebra striping, no vertical rules,
+   no hover fill beyond the faintest warm tint. */
+
+.feed {
+  /* A wide table must scroll inside its own panel rather than push the page
+     sideways. */
+  overflow-x: auto;
+}
+
+.feed__table {
+  width: 100%;
+  border-collapse: collapse;
+  white-space: nowrap;
+}
+
+.feed__table th {
+  text-align: left;
+  padding: 0 var(--space-4) var(--space-3) 0;
+  border-bottom: 1px solid var(--border-strong);
+  font-weight: 500;
+}
+
+.feed__table td {
+  padding: var(--space-4) var(--space-4) var(--space-4) 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  vertical-align: middle;
+}
+
+.feed__table tbody tr:last-child td {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.feed__table tbody tr:hover td {
+  background: #f2ede2;
+}
+
+.feed__table th:last-child,
+.feed__table td:last-child {
+  padding-right: 0;
+}
+
+.feed__when {
+  color: var(--text-secondary);
+  font-size: 12.5px;
+}
+
+.feed__id {
+  font-size: 12px;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary);
+}
+
+.feed__subject {
+  white-space: normal;
+  min-width: 220px;
+}
+
+.feed__subjectText {
+  display: block;
+  color: var(--text-primary);
+}
+
+/* The interaction type sits under the subject as a quiet caption rather than
+   taking a column of its own. */
+.feed__type {
+  display: block;
+  margin-top: 2px;
+  font-size: 10px;
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.feed__channel,
+.feed__outcome {
+  color: var(--text-secondary);
+  font-size: 12.5px;
+}
+
+/* The outcome is the last column and the most variable in length. Letting it
+   wrap is what keeps the table inside its panel instead of pushing a
+   scrollbar under six columns that would otherwise fit. */
+.feed__table td:last-child {
+  white-space: normal;
+  min-width: 116px;
+}
+
+/* The dot must not be dragged along by the wrapping text. */
+.feed__table td:last-child .dot {
+  vertical-align: 0.32em;
+}
+
+/* The status dot lives in global.css: the interaction list and the client
+   history use it too. */

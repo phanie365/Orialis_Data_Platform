@@ -1,0 +1,58 @@
+/* Horizontal distribution bars. Flat fills, square ends, no animation on
+   load - the figure should be readable the instant the panel appears. */
+
+.bars {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.bars__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: 7px;
+}
+
+.bars__label {
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.bars__figures {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+}
+
+.bars__value {
+  font-family: var(--font-serif);
+  font-size: 17px;
+  color: var(--forest);
+}
+
+.bars__share {
+  font-size: 11px;
+  color: var(--text-muted);
+  /* Fixed width so the percentages form a clean right-hand column even when
+     one reads 8.0% and another 65.0%. */
+  min-width: 42px;
+  text-align: right;
+}
+
+.bars__track {
+  height: 6px;
+  background: var(--series-track);
+  border-radius: 0;
+  overflow: hidden;
+}
+
+.bars__fill {
+  height: 100%;
+  /* No transition: the value does not change while the panel is open, so an
+     animation would be motion for its own sake. */
+}

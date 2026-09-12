@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 from fastapi import APIRouter, Depends, FastAPI
 
 from .database import close_pool, open_pool
-from .routers import advisors, branches, clients, interactions
+from .routers import advisors, branches, clients, interactions, stats
 from .security import require_api_key
 
 
@@ -62,6 +62,10 @@ api_v1.include_router(clients.router)
 api_v1.include_router(branches.router)
 api_v1.include_router(advisors.router)
 api_v1.include_router(interactions.router)
+
+# Aggregates, kept apart from the resource routers on purpose: this one
+# returns numbers about the CRM, never CRM records.
+api_v1.include_router(stats.router)
 
 app.include_router(api_v1)
 

@@ -1,0 +1,94 @@
+/* Dashboard layout. Wide gutters, a strict grid, nothing floating. */
+
+.dash__kpis {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-5);
+}
+
+.dash__alert {
+  padding: var(--space-4);
+}
+
+.dash__row {
+  display: grid;
+  gap: var(--space-5);
+  margin-top: var(--space-6);
+}
+
+.dash__row--three {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+/* The ranking is narrower than the activity table, which carries six
+   columns. */
+.dash__row--split {
+  grid-template-columns: minmax(300px, 0.74fr) minmax(460px, 1.26fr);
+  /* Each panel takes its own height instead of being stretched to match its
+     neighbour. Five advisors do not need the height of eight interactions,
+     and the stretched version left a tall empty box under the ranking. */
+  align-items: start;
+}
+
+/* -- The editorial line -----------------------------------------------------
+   Straight from the moodboard: a short italic serif statement, preceded by a
+   thin champagne rule, sitting on the page ground rather than inside a card.
+   It is the one purely brand-led element on the screen, and it is what keeps
+   the page from reading as a generic admin console. */
+.dash__quote {
+  display: flex;
+  align-items: center;
+  gap: var(--space-5);
+  margin-top: var(--space-7);
+  padding-bottom: var(--space-2);
+}
+
+.dash__quoteRule {
+  width: 46px;
+  height: 1px;
+  background: var(--champagne);
+  flex: none;
+}
+
+.dash__quoteText {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 19px;
+  font-weight: 300;
+  color: var(--text-secondary);
+  letter-spacing: 0.01em;
+}
+
+.dash__quoteText em {
+  font-style: italic;
+  color: var(--forest);
+}
+
+/* -- Responsive -------------------------------------------------------------
+   Two breakpoints, both driven by content: four KPIs stop fitting at about
+   1180px, three panels at about 980px. */
+@media (max-width: 1180px) {
+  .dash__kpis {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .dash__row--split {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 980px) {
+  .dash__row--three {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 560px) {
+  .dash__kpis {
+    grid-template-columns: 1fr;
+  }
+
+  .dash__quoteText {
+    font-size: 16px;
+  }
+}

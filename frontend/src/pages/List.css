@@ -1,0 +1,7 @@
+/* Shared by the three list pages: the filter bar, the table and the pager
+   read as a single framed block rather than three stacked cards. */
+
+.list {
+  display: flex;
+  flex-direction: column;
+}

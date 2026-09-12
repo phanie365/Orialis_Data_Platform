@@ -1,0 +1,17 @@
+# Frontend-local ignores. The repository-root .gitignore covers the rest.
+
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# The real environment file: it holds the CRM API key.
+.env
+.env.*
+!.env.example
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
