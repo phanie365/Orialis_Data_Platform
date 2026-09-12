@@ -126,6 +126,38 @@ def check_database_url(url):
 
 
 # ---------------------------------------------------------------------------
+# Reading the API key
+# ---------------------------------------------------------------------------
+
+def get_api_key():
+    """Return CRM_API_KEY, or stop with a clear message.
+
+    The value itself is never printed: it is the credential that protects
+    every /api/v1 route.
+
+    Missing is a hard stop rather than "run without protection". An API that
+    silently starts with authentication disabled is worse than one that
+    refuses to start: the failure would only be noticed once the endpoints
+    are already public.
+    """
+    key = os.environ.get("CRM_API_KEY", "").strip()
+    if not key:
+        raise SystemExit(
+            "CRM_API_KEY is not set.\n"
+            f"Expected it in: {ENV_PATH}\n"
+            "Every /api/v1 route is protected by it, so the API refuses to\n"
+            "start without one. Generate a value and add it to .env:\n"
+            '    python -c "import secrets; print(secrets.token_urlsafe(32))"'
+        )
+
+    if len(key) < 32:
+        print("  [note] CRM_API_KEY is shorter than 32 characters; a short "
+              "key is easier to guess. 32+ random characters are recommended.")
+
+    return key
+
+
+# ---------------------------------------------------------------------------
 # Keeping credentials out of the output
 # ---------------------------------------------------------------------------
 
