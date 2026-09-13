@@ -1,0 +1,81 @@
+# What must never reach the frontend build context.
+#
+# This file governs the `frontend/` context only - the build is run as
+# `docker build ./frontend`, so Docker reads THIS .dockerignore and not the
+# repository-root one. The root file stays untouched and keeps excluding
+# `frontend/` from the API build; the two contexts are independent by design.
+#
+# NOTE on pattern depth: a pattern without "**" only matches at the ROOT of
+# the context. The same lesson the API image learned with stale __pycache__
+# applies here, so anything that could exist at more than one depth is written
+# with `**/`.
+
+# --- Secrets ---------------------------------------------------------------
+# The entry that matters most. frontend/.env holds the real CRM_API_KEY. An
+# image can be pushed to a registry, pulled, and inspected layer by layer: a
+# .env baked into one is a credential published, and no later deletion removes
+# it from the layer that added it.
+#
+# The Dockerfile copies named files rather than `COPY . .`, so this is defence
+# in depth - but it is the defence that must never be the one that was
+# missing.
+**/.env
+**/.env.*
+!.env.example
+**/*.pem
+**/*.key
+*.p12
+*.pfx
+credentials.json
+secrets.json
+
+# --- Node ------------------------------------------------------------------
+# ~2,300 files. `npm ci` reinstalls them inside the builder from the lockfile,
+# so sending the host copy would be both wasteful and wrong: a tree built on
+# Windows can carry platform-specific binaries that do not run on linux.
+**/node_modules/
+**/.npm/
+**/npm-debug.log*
+**/yarn-debug.log*
+**/yarn-error.log*
+**/pnpm-debug.log*
+
+# --- Build output ----------------------------------------------------------
+# dist/ is PRODUCED by the builder stage, never imported into it. Sending a
+# local copy risks the image serving whatever happened to be on the developer
+# machine - a bundle built against different sources, possibly months old -
+# instead of the one built from the committed code a moment earlier.
+dist/
+dist-ssr/
+*.local
+
+# --- Version control -------------------------------------------------------
+# Not just size: history can hold values that were removed from the working
+# tree but still exist in an old commit.
+.git
+.gitignore
+.github
+
+# --- Docker's own files ----------------------------------------------------
+# Nothing in the build reads them; excluding them keeps a Dockerfile edit from
+# invalidating the context checksum.
+Dockerfile
+.dockerignore
+
+# --- Documentation ---------------------------------------------------------
+# Useful in the repository, dead weight in a running container.
+**/*.md
+
+# --- Editors and OS --------------------------------------------------------
+**/.vscode/
+**/.idea/
+**/*.swp
+**/*.swo
+**/.DS_Store
+**/Thumbs.db
+desktop.ini
+
+# --- Logs and scratch ------------------------------------------------------
+**/*.log
+logs/
+tmp/
