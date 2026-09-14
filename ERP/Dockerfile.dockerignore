@@ -1,0 +1,22 @@
+# Build-context filter for ERP/Dockerfile ONLY.
+#
+# The build runs from the repository root (`docker build -f ERP/Dockerfile .`).
+# BuildKit reads this file, named after the Dockerfile, INSTEAD of the root
+# .dockerignore - which belongs to the CRM image and is not modified.
+#
+# A whitelist rather than a blacklist: everything is excluded, then only the
+# three inputs the API image copies are let back in. A new directory added to
+# the repository tomorrow - generated exports, a notebook, a .env in a new
+# place - stays out of the context without anyone having to remember it.
+
+*
+
+!requirements.txt
+!ERP/config.py
+!ERP/app/
+
+# Re-excluded inside the whitelisted tree (later lines win).
+**/__pycache__/
+**/*.py[cod]
+**/.env
+**/.env.*

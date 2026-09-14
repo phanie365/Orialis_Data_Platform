@@ -1,0 +1,27 @@
+# Build-context filter for ERP/frontend/Dockerfile (context = ERP/frontend/).
+#
+# The Dockerfile copies named files, never `COPY . .`, so this is defence in
+# depth - and it keeps the context small.
+
+# --- Secrets: ERP/frontend/.env holds the real ERP_API_KEY -----------------
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+
+# --- Node: reinstalled from the lockfile inside the builder ----------------
+# A tree installed on Windows can also carry binaries that do not run on linux.
+**/node_modules/
+**/npm-debug.log*
+
+# --- Build output: produced by the builder, never imported into it ---------
+dist/
+*.local
+
+# --- Not needed to build or run --------------------------------------------
+tests/
+**/*.md
+.gitignore
+Dockerfile
+.dockerignore
+**/*.log

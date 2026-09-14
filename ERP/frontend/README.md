@@ -38,8 +38,24 @@ configuration refuses to start if a `VITE_*` variable looks like a secret,
 since Vite would inline it into the bundle. `tests/security.test.js` checks
 all of this against the real dev server and a real build.
 
-There is no production server here: serving `dist/` in production would need a
-proxy that holds the key, which belongs to a later deployment step.
+In production the same contract is kept by `server.js` (Node standard library
+only): it serves `dist/`, proxies `/api/*` to `ERP_API_URL`, strips any client
+`X-API-Key`, attaches `ERP_API_KEY`, answers backend failures as JSON, falls
+back to `index.html` for routes, and listens on `0.0.0.0:$PORT`
+(`tests/server.test.js`).
+
+## Docker
+
+```bash
+docker build -t orialis-erp-frontend ./ERP/frontend
+docker run --rm -p 8080:8080 \
+    -e ERP_API_URL="http://<erp-api-host>:8000" -e ERP_API_KEY="..." orialis-erp-frontend
+```
+
+Multi-stage: Node 22 builds the bundle, and the runtime image (`node:22-alpine`,
+user `node`) holds only `dist/`, `server.js` and `package.json` — no
+`node_modules`, no sources, no `.env`. The API image is built from the
+repository root with `docker build -f ERP/Dockerfile -t orialis-erp-api .`.
 
 ## Screens
 
