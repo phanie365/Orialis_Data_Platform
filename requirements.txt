@@ -41,3 +41,14 @@ psycopg_pool>=3.2,<4.0
 # Reads DATABASE_URL from a local .env file (see .env.example).
 # The .env file itself is never committed.
 python-dotenv>=1.0,<2.0
+
+# --- ERP file extracts -----------------------------------------------------
+
+# Writes the monthly commission workbook (ERP/exporters/commissions_xlsx.py).
+#
+# The only dependency this project has added that is not needed to serve an
+# API, and it is unavoidable: .xlsx is a zip of XML parts, and hand-rolling
+# one to avoid a dependency would be strictly worse than using the library
+# every other tool in the ecosystem uses. The daily CSV extract needs nothing
+# beyond the standard library.
+openpyxl>=3.1,<4.0

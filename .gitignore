@@ -42,6 +42,18 @@ dist/
 *.egg-info/
 .eggs/
 
+# --- ERP file extracts -----------------------------------------------------
+# Generated artefacts, not source. `python ERP/scripts/export_files.py
+# --backfill` rebuilds every one of them from PostgreSQL, deterministically,
+# so committing them would version a derivative of data that is itself
+# versioned by its generator - and it would put ~1 100 small files in every
+# clone.
+#
+# The .gitkeep keeps the root directory itself in the tree, so the layout is
+# documented even when no export has been run.
+ERP/exports/**
+!ERP/exports/.gitkeep
+
 # --- Test and tooling caches -----------------------------------------------
 .pytest_cache/
 .mypy_cache/
