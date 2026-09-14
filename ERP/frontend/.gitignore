@@ -1,0 +1,13 @@
+# Frontend-local ignores. The repository-root .gitignore does not cover
+# node_modules/.
+
+node_modules/
+dist/
+*.local
+
+# The real environment file: it holds ERP_API_KEY.
+.env
+.env.*
+!.env.example
+
+npm-debug.log*
